@@ -52,20 +52,35 @@ class BrowserWindowController: NSWindowController {
         content.translatesAutoresizingMaskIntoConstraints = false
 
         // Tab bar setup
+        // Tab bar container (keeps scroll view and new tab button together)
+        let tabBarContainer = NSView()
+        tabBarContainer.translatesAutoresizingMaskIntoConstraints = false
+
         tabStackView.orientation = .horizontal
         tabStackView.spacing = 6
         tabStackView.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+        tabStackView.translatesAutoresizingMaskIntoConstraints = false
+        tabStackView.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         tabScrollView.hasHorizontalScroller = true
         tabScrollView.drawsBackground = false
-        tabScrollView.documentView = tabStackView
         tabScrollView.translatesAutoresizingMaskIntoConstraints = false
         tabScrollView.borderType = .noBorder
+
+        // Create a document container for the scroll view and add the tabStack inside it.
+        let docView = NSView()
+        docView.translatesAutoresizingMaskIntoConstraints = false
+        docView.addSubview(tabStackView)
+        tabStackView.translatesAutoresizingMaskIntoConstraints = false
+        tabStackView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        tabScrollView.documentView = docView
 
         newTabButton.bezelStyle = .texturedRounded
         newTabButton.target = self
         newTabButton.action = #selector(newTabPressed(_:))
         newTabButton.setContentHuggingPriority(.required, for: .horizontal)
+        newTabButton.translatesAutoresizingMaskIntoConstraints = false
 
         // Address label
         addressLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -76,24 +91,30 @@ class BrowserWindowController: NSWindowController {
         // Content area
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        // Layout
-        content.addSubview(tabScrollView)
-        content.addSubview(newTabButton)
+        // Layout - add tab bar container
+        content.addSubview(tabBarContainer)
+        tabBarContainer.addSubview(tabScrollView)
+        tabBarContainer.addSubview(newTabButton)
         content.addSubview(addressLabel)
         content.addSubview(contentContainer)
 
         NSLayoutConstraint.activate([
-            tabScrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            tabScrollView.trailingAnchor.constraint(equalTo: newTabButton.leadingAnchor, constant: -8),
-            tabScrollView.topAnchor.constraint(equalTo: content.topAnchor),
-            tabScrollView.heightAnchor.constraint(equalToConstant: 36),
+            tabBarContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            tabBarContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            tabBarContainer.topAnchor.constraint(equalTo: content.topAnchor),
+            tabBarContainer.heightAnchor.constraint(equalToConstant: 36),
 
-            newTabButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -8),
-            newTabButton.centerYAnchor.constraint(equalTo: tabScrollView.centerYAnchor),
+            tabScrollView.leadingAnchor.constraint(equalTo: tabBarContainer.leadingAnchor, constant: 8),
+            tabScrollView.centerYAnchor.constraint(equalTo: tabBarContainer.centerYAnchor),
+            tabScrollView.trailingAnchor.constraint(equalTo: newTabButton.leadingAnchor, constant: -8),
+            tabScrollView.heightAnchor.constraint(equalTo: tabBarContainer.heightAnchor),
+
+            newTabButton.trailingAnchor.constraint(equalTo: tabBarContainer.trailingAnchor, constant: -8),
+            newTabButton.centerYAnchor.constraint(equalTo: tabBarContainer.centerYAnchor),
 
             addressLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 8),
             addressLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -8),
-            addressLabel.topAnchor.constraint(equalTo: tabScrollView.bottomAnchor, constant: 6),
+            addressLabel.topAnchor.constraint(equalTo: tabBarContainer.bottomAnchor, constant: 6),
             addressLabel.heightAnchor.constraint(equalToConstant: 18),
 
             contentContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -101,6 +122,22 @@ class BrowserWindowController: NSWindowController {
             contentContainer.topAnchor.constraint(equalTo: addressLabel.bottomAnchor, constant: 6),
             contentContainer.bottomAnchor.constraint(equalTo: content.bottomAnchor)
         ])
+
+        // Constrain stack view to the docView and ensure docView width is at least the scrollContent width so it won't collapse.
+        NSLayoutConstraint.activate([
+            tabStackView.leadingAnchor.constraint(equalTo: docView.leadingAnchor),
+            tabStackView.topAnchor.constraint(equalTo: docView.topAnchor),
+            tabStackView.bottomAnchor.constraint(equalTo: docView.bottomAnchor),
+            tabStackView.heightAnchor.constraint(equalTo: docView.heightAnchor),
+
+            // Ensure document view expands to fill the scroll content area (prevents zero width collapse).
+            docView.widthAnchor.constraint(greaterThanOrEqualTo: tabScrollView.contentView.widthAnchor)
+        ])
+
+        // Make the docView flexible by giving its width constraint a lower priority so it can grow with content.
+        if let widthConstraint = docView.constraints.first(where: { $0.firstAnchor == docView.widthAnchor }) {
+            widthConstraint.priority = .defaultLow
+        }
 
         // Initial render of tabs
         rebuildTabButtons()
@@ -152,10 +189,12 @@ extension BrowserWindowController {
     }
 
     @objc private func tabsChanged() {
+        NSLog("Tabs changed: count=\(TabManager.shared.tabs.count)")
         rebuildTabButtons()
     }
 
     @objc private func activeTabChanged() {
+        NSLog("Active tab changed: activeIndex=\(TabManager.shared.activeIndex)")
         // attach active web view
         guard TabManager.shared.tabs.indices.contains(TabManager.shared.activeIndex) else {
             // no tabs, create a new one
@@ -172,6 +211,7 @@ extension BrowserWindowController {
     }
 
     private func rebuildTabButtons() {
+        NSLog("Rebuilding tabs: \(TabManager.shared.tabs.map { $0.title.isEmpty ? ($0.url?.host ?? "New Tab") : $0.title })")
         // Clear
         tabStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
@@ -181,6 +221,8 @@ extension BrowserWindowController {
             btn.setButtonType(.momentaryPushIn)
             btn.bezelStyle = .texturedSquare
             btn.translatesAutoresizingMaskIntoConstraints = false
+            btn.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            btn.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
             // close button overlay
             let close = NSButton(title: "✕", target: self, action: #selector(closeTabPressed(_:)))
@@ -188,6 +230,9 @@ extension BrowserWindowController {
             close.bezelStyle = .regularSquare
             close.font = NSFont.systemFont(ofSize: 10)
             close.translatesAutoresizingMaskIntoConstraints = false
+            close.setContentHuggingPriority(.required, for: .horizontal)
+            close.setContentCompressionResistancePriority(.required, for: .horizontal)
+            close.widthAnchor.constraint(equalToConstant: 18).isActive = true
 
             let container = NSView()
             container.translatesAutoresizingMaskIntoConstraints = false
@@ -204,6 +249,8 @@ extension BrowserWindowController {
                 close.centerYAnchor.constraint(equalTo: btn.centerYAnchor),
             ])
 
+            // Ensure the container has an intrinsic width based on its children
+            container.setContentHuggingPriority(.defaultLow, for: .horizontal)
             tabStackView.addArrangedSubview(container)
         }
 

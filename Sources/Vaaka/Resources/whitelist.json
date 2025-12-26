@@ -1,10 +1,6 @@
 {
   "version": "1.0",
-  "simple_domains": [
-    "example.com",
-    "github.com",
-    "google.com"
-  ],
+  "simple_domains": ["example.com", "github.com", "google.com"],
   "regex_patterns": [],
   "builtin_oauth": [
     "accounts.google.com",
