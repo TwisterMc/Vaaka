@@ -1,0 +1,119 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 55;
+	objects = {
+		/* Begin PBXProject section */
+		A1D0E0001D0E000100000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 1400;
+			};
+			buildConfigurationList = A1D0E0001D0E000100000002 /* Build configuration list for PBXProject */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+			);
+			mainGroup = A1D0E0001D0E000100000003;
+			productRefGroup = A1D0E0001D0E000100000004;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A1D0E0001D0E000100000005 /* Vaaka */,
+			);
+		};
+		/* End PBXProject section */
+
+		/* Begin PBXNativeTarget section */
+		A1D0E0001D0E000100000005 /* Vaaka */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1D0E0001D0E000100000006 /* Build configuration list for PBXNativeTarget "Vaaka" */;
+			buildPhases = (
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Vaaka;
+			productName = Vaaka;
+			productReference = A1D0E0001D0E000100000007 /* Vaaka.app */;
+			productType = "com.apple.product-type.application";
+		};
+		/* End PBXNativeTarget section */
+
+		/* Begin PBXGroup section */
+		A1D0E0001D0E000100000003 = {
+			isa = PBXGroup;
+			children = (
+				A1D0E0001D0E000100000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+
+		A1D0E0001D0E000100000004 = {
+			isa = PBXGroup;
+			children = (
+				A1D0E0001D0E000100000007 /* Vaaka.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		/* End PBXGroup section */
+
+		/* Begin PBXFileReference section */
+		A1D0E0001D0E000100000007 /* Vaaka.app */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = "wrapper.application";
+			name = Vaaka.app;
+			path = build/Vaaka.app;
+			sourceTree = "<group>";
+		};
+		/* End PBXFileReference section */
+
+		/* Begin XCBuildConfiguration section */
+		A1D0E0001D0E000100000002 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = com.twistermc.Vaaka;
+				INFOPLIST_FILE = Resources/Info.plist;
+			};
+			name = Debug;
+		};
+
+		A1D0E0001D0E000100000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = com.twistermc.Vaaka;
+				INFOPLIST_FILE = Resources/Info.plist;
+			};
+			name = Release;
+		};
+		/* End XCBuildConfiguration section */
+
+		/* Begin XCConfigurationList section */
+		A1D0E0001D0E000100000002 /* Build configuration list for PBXProject */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1D0E0001D0E000100000002 /* Debug */,
+				A1D0E0001D0E000100000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+
+		A1D0E0001D0E000100000006 /* Build configuration list for PBXNativeTarget "Vaaka" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1D0E0001D0E000100000002 /* Debug */,
+				A1D0E0001D0E000100000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		/* End XCConfigurationList section */
+	};
+	rootObject = A1D0E0001D0E000100000001 /* Project object */;
+}
