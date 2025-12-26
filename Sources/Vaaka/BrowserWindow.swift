@@ -15,7 +15,9 @@ class BrowserWindowController: NSWindowController {
 
     override init(window: NSWindow?) {
         let config = WKWebViewConfiguration()
-        config.preferences.javaScriptEnabled = true
+        let webpagePreferences = WKWebpagePreferences()
+        webpagePreferences.allowsContentJavaScript = true
+        config.defaultWebpagePreferences = webpagePreferences
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
 
         webView = WKWebView(frame: .zero, configuration: config)

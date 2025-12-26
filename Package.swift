@@ -11,7 +11,7 @@ let package = Package(
         .executableTarget(
             name: "Vaaka",
             path: "Sources/Vaaka",
-            resources: [.copy("../Resources/whitelist.json")]
+            resources: [.process("Resources")]
         ),
     ]
 )
