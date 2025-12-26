@@ -70,11 +70,13 @@ class WhitelistManager {
         guard !simpleDomains.contains(domain) else { return }
         simpleDomains.append(domain)
         saveWhitelist()
+        NotificationCenter.default.post(name: Notification.Name("Vaaka.WhitelistChanged"), object: self)
     }
 
     func removeDomain(_ domain: String) {
         simpleDomains.removeAll { $0 == domain }
         saveWhitelist()
+        NotificationCenter.default.post(name: Notification.Name("Vaaka.WhitelistChanged"), object: self)
     }
 
     func isWhitelisted(url: URL) -> Bool {

@@ -3,6 +3,7 @@ import WebKit
 
 class BrowserWindowController: NSWindowController {
     // UI
+    private let tabBarContainer: NSView = NSView()
     private let tabScrollView: NSScrollView = NSScrollView()
     private let tabStackView: NSStackView = NSStackView()
     private let newTabButton: NSButton = NSButton(title: "+", target: nil, action: nil)
@@ -13,7 +14,8 @@ class BrowserWindowController: NSWindowController {
 
     // Tab coordination
     private var activeWebView: WKWebView? {
-        guard let idx = TabManager.shared.tabs.indices.contains(TabManager.shared.activeIndex) ? TabManager.shared.activeIndex : nil else { return nil }
+        let idx = TabManager.shared.activeIndex
+        guard TabManager.shared.tabs.indices.contains(idx) else { return nil }
         return TabManager.shared.tabs[idx].webView
     }
 
@@ -36,12 +38,17 @@ class BrowserWindowController: NSWindowController {
         NotificationCenter.default.addObserver(self, selector: #selector(tabsChanged), name: .TabsChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(activeTabChanged), name: .ActiveTabChanged, object: nil)
 
-        // Create initial tab
-        if TabManager.shared.tabs.isEmpty {
-            _ = TabManager.shared.createTab(with: URL(string: "https://example.com"))
-        } else {
-            // ensure active is visible
-            activeTabChanged()
+        // Window delegate for lifecycle hooks
+        self.window?.delegate = self
+
+        // Create initial tab once the run loop has a chance to lay out the window
+        DispatchQueue.main.async {
+            if TabManager.shared.tabs.isEmpty {
+                _ = TabManager.shared.createTab(with: URL(string: "https://example.com"))
+            } else {
+                // ensure active is visible
+                self.activeTabChanged()
+            }
         }
     }
 
@@ -91,18 +98,39 @@ class BrowserWindowController: NSWindowController {
         // Content area
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        // Layout - add tab bar container
-        content.addSubview(tabBarContainer)
+        // Layout - use a vertical stack so contentContainer expands correctly
+        // Layout using explicit constraints so contentContainer fills available space
+        tabBarContainer.translatesAutoresizingMaskIntoConstraints = false
         tabBarContainer.addSubview(tabScrollView)
         tabBarContainer.addSubview(newTabButton)
+        content.addSubview(tabBarContainer)
         content.addSubview(addressLabel)
         content.addSubview(contentContainer)
+
+        // fixed heights
+        tabBarContainer.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        addressLabel.heightAnchor.constraint(equalToConstant: 18).isActive = true
+
+        // make contentContainer flexible
+        contentContainer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        contentContainer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        contentContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentContainer.wantsLayer = true
+        contentContainer.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
         NSLayoutConstraint.activate([
             tabBarContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             tabBarContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             tabBarContainer.topAnchor.constraint(equalTo: content.topAnchor),
-            tabBarContainer.heightAnchor.constraint(equalToConstant: 36),
+
+            addressLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 8),
+            addressLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -8),
+            addressLabel.topAnchor.constraint(equalTo: tabBarContainer.bottomAnchor, constant: 6),
+
+            contentContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            contentContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            contentContainer.topAnchor.constraint(equalTo: addressLabel.bottomAnchor, constant: 6),
+            contentContainer.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
             tabScrollView.leadingAnchor.constraint(equalTo: tabBarContainer.leadingAnchor, constant: 8),
             tabScrollView.centerYAnchor.constraint(equalTo: tabBarContainer.centerYAnchor),
@@ -110,17 +138,7 @@ class BrowserWindowController: NSWindowController {
             tabScrollView.heightAnchor.constraint(equalTo: tabBarContainer.heightAnchor),
 
             newTabButton.trailingAnchor.constraint(equalTo: tabBarContainer.trailingAnchor, constant: -8),
-            newTabButton.centerYAnchor.constraint(equalTo: tabBarContainer.centerYAnchor),
-
-            addressLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 8),
-            addressLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -8),
-            addressLabel.topAnchor.constraint(equalTo: tabBarContainer.bottomAnchor, constant: 6),
-            addressLabel.heightAnchor.constraint(equalToConstant: 18),
-
-            contentContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            contentContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            contentContainer.topAnchor.constraint(equalTo: addressLabel.bottomAnchor, constant: 6),
-            contentContainer.bottomAnchor.constraint(equalTo: content.bottomAnchor)
+            newTabButton.centerYAnchor.constraint(equalTo: tabBarContainer.centerYAnchor)
         ])
 
         // Constrain stack view to the docView and ensure docView width is at least the scrollContent width so it won't collapse.
@@ -178,23 +196,76 @@ extension BrowserWindowController {
         // Remove existing
         for sub in contentContainer.subviews { sub.removeFromSuperview() }
         webView.translatesAutoresizingMaskIntoConstraints = false
+        webView.wantsLayer = true
+        webView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         contentContainer.addSubview(webView)
-        NSLayoutConstraint.activate([
+
+        // Try using Auto Layout first
+        let constraints = [
             webView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
             webView.topAnchor.constraint(equalTo: contentContainer.topAnchor),
             webView.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor)
-        ])
+        ]
+        NSLayoutConstraint.activate(constraints)
         webView.navigationDelegate = self
+
+        // Force layout so we can quickly observe frames
+        contentContainer.layoutSubtreeIfNeeded()
+        webView.layoutSubtreeIfNeeded()
+        print("Attaching webView (post-layout); url=\(webView.url?.absoluteString ?? "(nil)") frame=\(webView.frame) container=\(contentContainer.frame)")
+        vaakaLog("Attaching webView (post-layout); url=\(webView.url?.absoluteString ?? "(nil)") frame=\(webView.frame) container=\(contentContainer.frame)")
+
+        // If height is still zero (autolayout hasn't resolved), fallback to manual frame sizing
+        if contentContainer.frame.height <= 1 {
+            NSLayoutConstraint.deactivate(constraints)
+            webView.translatesAutoresizingMaskIntoConstraints = true
+            let contentBounds = contentContainer.bounds
+            var manualFrame = contentBounds
+            if manualFrame.height <= 1 {
+                // compute based on window
+                if let w = self.window, let contentView = w.contentView {
+                    let contentRect = w.contentLayoutRect
+                    let topReserved = CGFloat(36 + 6 + 18 + 6) // tabbar + gap + address + gap
+                    let width = contentRect.width
+                    let height = max(200, contentRect.height - topReserved)
+
+                    let frameInWindow = CGRect(x: contentRect.minX, y: contentRect.minY, width: width, height: height)
+
+                    // Add webView directly to window contentView as a fallback
+                    webView.removeFromSuperview()
+                    webView.translatesAutoresizingMaskIntoConstraints = true
+                    webView.frame = frameInWindow
+                    webView.autoresizingMask = [.width, .height]
+                    contentView.addSubview(webView)
+                    contentView.layoutSubtreeIfNeeded()
+
+                    print("Attaching webView (window fallback); frame=\(webView.frame) contentView=\(contentView.frame)")
+                    vaakaLog("Attaching webView (window fallback); frame=\(webView.frame) contentView=\(contentView.frame)")
+                    return
+                } else {
+                    manualFrame.size.height = 400
+                    manualFrame.size.width = 800
+                }
+            }
+            webView.frame = manualFrame
+            webView.autoresizingMask = [.width, .height]
+            contentContainer.addSubview(webView)
+            contentContainer.layoutSubtreeIfNeeded()
+            print("Attaching webView (manual layout); frame=\(webView.frame) container=\(contentContainer.frame)")
+            vaakaLog("Attaching webView (manual layout); frame=\(webView.frame) container=\(contentContainer.frame)")
+        }
     }
 
     @objc private func tabsChanged() {
-        NSLog("Tabs changed: count=\(TabManager.shared.tabs.count)")
+        print("Tabs changed: count=\(TabManager.shared.tabs.count)")
+        vaakaLog("Tabs changed: count=\(TabManager.shared.tabs.count)")
         rebuildTabButtons()
     }
 
     @objc private func activeTabChanged() {
-        NSLog("Active tab changed: activeIndex=\(TabManager.shared.activeIndex)")
+        print("Active tab changed: activeIndex=\(TabManager.shared.activeIndex)")
+        vaakaLog("Active tab changed: activeIndex=\(TabManager.shared.activeIndex)")
         // attach active web view
         guard TabManager.shared.tabs.indices.contains(TabManager.shared.activeIndex) else {
             // no tabs, create a new one
@@ -211,18 +282,33 @@ extension BrowserWindowController {
     }
 
     private func rebuildTabButtons() {
-        NSLog("Rebuilding tabs: \(TabManager.shared.tabs.map { $0.title.isEmpty ? ($0.url?.host ?? "New Tab") : $0.title })")
+        print("Rebuilding tabs: \(TabManager.shared.tabs.map { $0.title.isEmpty ? ($0.url?.host ?? "New Tab") : $0.title })")
+        vaakaLog("Rebuilding tabs: \(TabManager.shared.tabs.map { $0.title.isEmpty ? ($0.url?.host ?? "New Tab") : $0.title })")
         // Clear
         tabStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         for (index, tab) in TabManager.shared.tabs.enumerated() {
-            let btn = NSButton(title: tab.title.isEmpty ? (tab.url?.host ?? "New Tab") : tab.title, target: self, action: #selector(tabButtonPressed(_:)))
-            btn.tag = index
-            btn.setButtonType(.momentaryPushIn)
-            btn.bezelStyle = .texturedSquare
-            btn.translatesAutoresizingMaskIntoConstraints = false
-            btn.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            btn.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            // Build a tab view with favicon, title and close button + loading spinner
+            let faviconView = NSImageView()
+            faviconView.wantsLayer = true
+            faviconView.translatesAutoresizingMaskIntoConstraints = false
+            faviconView.image = tab.favicon
+            faviconView.imageScaling = .scaleProportionallyUpOrDown
+            faviconView.layer?.cornerRadius = 4
+            faviconView.layer?.masksToBounds = true
+            faviconView.widthAnchor.constraint(equalToConstant: 16).isActive = true
+            faviconView.heightAnchor.constraint(equalToConstant: 16).isActive = true
+
+            let titleLabel = NSTextField(labelWithString: tab.title.isEmpty ? (tab.url?.host ?? "New Tab") : tab.title)
+            titleLabel.lineBreakMode = .byTruncatingTail
+            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+            let spinner = NSProgressIndicator()
+            spinner.style = .spinning
+            spinner.controlSize = .small
+            spinner.isDisplayedWhenStopped = false
+            spinner.translatesAutoresizingMaskIntoConstraints = false
+            if tab.isLoading { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 
             // close button overlay
             let close = NSButton(title: "✕", target: self, action: #selector(closeTabPressed(_:)))
@@ -234,19 +320,41 @@ extension BrowserWindowController {
             close.setContentCompressionResistancePriority(.required, for: .horizontal)
             close.widthAnchor.constraint(equalToConstant: 18).isActive = true
 
+            let contentStack = NSStackView(views: [faviconView, titleLabel])
+            contentStack.orientation = .horizontal
+            contentStack.spacing = 6
+            contentStack.alignment = .centerY
+            contentStack.translatesAutoresizingMaskIntoConstraints = false
+
             let container = NSView()
             container.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(btn)
+            container.addSubview(contentStack)
+            container.addSubview(spinner)
             container.addSubview(close)
 
             NSLayoutConstraint.activate([
-                btn.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                btn.topAnchor.constraint(equalTo: container.topAnchor),
-                btn.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                contentStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
+                contentStack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
 
-                close.leadingAnchor.constraint(equalTo: btn.trailingAnchor, constant: 6),
-                close.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-                close.centerYAnchor.constraint(equalTo: btn.centerYAnchor),
+                spinner.leadingAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: 6),
+                spinner.centerYAnchor.constraint(equalTo: contentStack.centerYAnchor),
+
+                close.leadingAnchor.constraint(equalTo: spinner.trailingAnchor, constant: 6),
+                close.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -4),
+                close.centerYAnchor.constraint(equalTo: contentStack.centerYAnchor)
+            ])
+
+            // Make the container clickable by adding a button overlay
+            let clickButton = NSButton(title: "", target: self, action: #selector(tabButtonPressed(_:)))
+            clickButton.isBordered = false
+            clickButton.translatesAutoresizingMaskIntoConstraints = false
+            clickButton.tag = index
+            container.addSubview(clickButton, positioned: .below, relativeTo: contentStack)
+            NSLayoutConstraint.activate([
+                clickButton.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                clickButton.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                clickButton.topAnchor.constraint(equalTo: container.topAnchor),
+                clickButton.bottomAnchor.constraint(equalTo: container.bottomAnchor)
             ])
 
             // Ensure the container has an intrinsic width based on its children
@@ -254,24 +362,52 @@ extension BrowserWindowController {
             tabStackView.addArrangedSubview(container)
         }
 
-        // Keep new tab button visible at end
-        if newTabButton.superview == nil {
-            // ensure it's in window view
-            if let content = window?.contentView {
-                content.addSubview(newTabButton)
-            }
+        // Ensure the newTabButton is inside the tabBarContainer
+        if newTabButton.superview !== tabBarContainer {
+            newTabButton.removeFromSuperview()
+            tabBarContainer.addSubview(newTabButton)
+            // Reinforce constraints to keep it positioned correctly
+            NSLayoutConstraint.activate([
+                newTabButton.trailingAnchor.constraint(equalTo: tabBarContainer.trailingAnchor, constant: -8),
+                newTabButton.centerYAnchor.constraint(equalTo: tabBarContainer.centerYAnchor)
+            ])
         }
     }
 }
 
 // MARK: - WKNavigationDelegate
-extension BrowserWindowController: WKNavigationDelegate {
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        addressLabel.stringValue = webView.url?.absoluteString ?? ""
+extension BrowserWindowController: WKNavigationDelegate, NSWindowDelegate {
+    func windowDidBecomeKey(_ notification: Notification) {
+        print("windowDidBecomeKey - refreshing active tab UI")
+        vaakaLog("windowDidBecomeKey - refreshing active tab UI")
+        // Re-attach after window becomes key so layout is established
+        DispatchQueue.main.async {
+            self.contentContainer.layoutSubtreeIfNeeded()
+            self.activeTabChanged()
+        }
+    }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         if let idx = TabManager.shared.tabs.firstIndex(where: { $0.webView == webView }) {
-            TabManager.shared.tabs[idx].title = webView.title ?? webView.url?.host ?? ""
+            let tab = TabManager.shared.tabs[idx]
+            tab.isLoading = true
+            DispatchQueue.main.async { tab.fetchFaviconIfNeeded() }
             rebuildTabButtons()
         }
+        print("webView didStartProvisionalNavigation: url=\(webView.url?.absoluteString ?? "(nil)")")
+        vaakaLog("webView didStartProvisionalNavigation: url=\(webView.url?.absoluteString ?? "(nil)")")
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if let idx = TabManager.shared.tabs.firstIndex(where: { $0.webView == webView }) {
+            let tab = TabManager.shared.tabs[idx]
+            tab.isLoading = false
+            tab.title = webView.title ?? webView.url?.host ?? ""
+            tab.url = webView.url
+            DispatchQueue.main.async { tab.fetchFaviconIfNeeded() }
+            rebuildTabButtons()
+        }
+        print("webView didFinish: url=\(webView.url?.absoluteString ?? "(nil)")")
+        vaakaLog("webView didFinish: url=\(webView.url?.absoluteString ?? "(nil)")")
     }
 
     func webView(_ webView: WKWebView,

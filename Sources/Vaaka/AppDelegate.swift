@@ -16,6 +16,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         windowController?.window?.makeKeyAndOrderFront(nil)
 
+        print("Vaaka launched: window frame=\(windowController?.window?.frame ?? .zero)")
+        vaakaLog("Launched; window frame=\(windowController?.window?.frame ?? .zero)")
+
         // Create a minimal app menu so standard actions are available
         createMainMenu()
 
@@ -23,9 +26,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openPreferences(_ sender: Any?) {
-        // Placeholder: show preferences window when implemented
-        NSLog("Preferences requested")
+        if preferencesWindowController == nil {
+            preferencesWindowController = PreferencesWindowController()
+        }
+        preferencesWindowController?.showWindow(self)
+        NSApp.activate(ignoringOtherApps: true)
     }
+
+    private var preferencesWindowController: PreferencesWindowController?
+
 
     private func createMainMenu() {
         let mainMenu = NSMenu()

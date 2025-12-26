@@ -14,7 +14,9 @@ final class Tab: NSObject {
     var title: String = ""
     var url: URL?
     var favicon: NSImage?
-    var isLoading: Bool = false
+    var isLoading: Bool = false {
+        didSet { NotificationCenter.default.post(name: Notification.Name("Vaaka.TabUpdated"), object: self) }
+    }
     var settings: TabSettings = .default
     var lastActiveTime: Date = Date()
     var isSuspended: Bool = false
@@ -23,5 +25,15 @@ final class Tab: NSObject {
     init(configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
         self.webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
+    }
+
+    func fetchFaviconIfNeeded() {
+        guard favicon == nil, let u = url else { return }
+        FaviconFetcher.shared.fetchFavicon(for: u) { img in
+            DispatchQueue.main.async {
+                self.favicon = img
+                NotificationCenter.default.post(name: Notification.Name("Vaaka.TabUpdated"), object: self)
+            }
+        }
     }
 }
