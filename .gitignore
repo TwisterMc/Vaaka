@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift
+.build/
+
+# Xcode
+*.xcworkspace
+*.xcuserstate
+*.xcuserdata/
+DerivedData/
+Build/
+*.xcarchive
+
+# Generated files
+.vscode/
