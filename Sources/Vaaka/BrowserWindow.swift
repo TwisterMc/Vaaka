@@ -2,22 +2,21 @@ import AppKit
 import WebKit
 
 class BrowserWindowController: NSWindowController {
-    // UI
-    private let tabBarContainer: NSView = NSView()
-    private let tabScrollView: NSScrollView = NSScrollView()
-    private let tabStackView: NSStackView = NSStackView()
-    private let newTabButton: NSButton = NSButton(title: "+", target: nil, action: nil)
+    // UI – vertical tab rail on the left + content on the right
+    private let railContainer: NSView = NSView()
+    private let railScrollView: NSScrollView = NSScrollView()
+    private let railStackView: NSStackView = NSStackView()
 
-    // Address and content
-    let addressLabel: NSTextField
     private let contentContainer: NSView = NSView()
 
-    // Tab coordination
-    private var activeWebView: WKWebView? {
-        let idx = TabManager.shared.activeIndex
-        guard TabManager.shared.tabs.indices.contains(idx) else { return nil }
-        return TabManager.shared.tabs[idx].webView
-    }
+    // Constants
+    private let railWidth: CGFloat = 52.0 // within 44–56pt range
+
+    // Track created webviews attached to the content container
+    private var webViewsAttached: Set<String> = [] // site.id values
+
+    // Event monitor for keyboard shortcuts
+    private var keyMonitor: Any?
 
     convenience init() {
         let rect = NSRect(x: 100, y: 100, width: 1200, height: 800)
@@ -28,409 +27,646 @@ class BrowserWindowController: NSWindowController {
     }
 
     override init(window: NSWindow?) {
-        addressLabel = NSTextField(labelWithString: "")
-
         super.init(window: window)
-
         setupUI()
 
-        // Observe tab manager
+        // Observe SiteTabManager for tab list / active changes
         NotificationCenter.default.addObserver(self, selector: #selector(tabsChanged), name: .TabsChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(activeTabChanged), name: .ActiveTabChanged, object: nil)
 
-        // Window delegate for lifecycle hooks
+        // Observe loading notifications for showing spinner states
+        NotificationCenter.default.addObserver(self, selector: #selector(siteDidStartLoading(_:)), name: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(siteDidFinishLoading(_:)), name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: nil)
+
+        // Also react to site list changes
+        NotificationCenter.default.addObserver(self, selector: #selector(sitesChanged), name: .SitesChanged, object: nil)
+
+        // Window delegate
         self.window?.delegate = self
 
-        // Create initial tab once the run loop has a chance to lay out the window
-        DispatchQueue.main.async {
-            if TabManager.shared.tabs.isEmpty {
-                _ = TabManager.shared.createTab(with: URL(string: "https://example.com"))
-            } else {
-                // ensure active is visible
-                self.activeTabChanged()
-            }
+        // Keyboard shortcuts
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] evt in
+            return self?.handleKeyEvent(evt) ?? evt
         }
+
+        // Minimum window size
+        if let w = self.window {
+            w.minSize = NSSize(width: 640, height: 400)
+            w.contentMinSize = NSSize(width: 640, height: 400)
+        }
+
+        // Initial render
+        rebuildRailButtons()
+        attachAllWebViewsIfNeeded()
+        activeTabChanged()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    deinit {
+        if let km = keyMonitor { NSEvent.removeMonitor(km) }
+    }
+
     private func setupUI() {
         guard let content = window?.contentView else { return }
-        content.translatesAutoresizingMaskIntoConstraints = false
+        content.subviews.forEach { $0.removeFromSuperview() }
 
-        // Tab bar setup
-        // Tab bar container (keeps scroll view and new tab button together)
-        let tabBarContainer = NSView()
-        tabBarContainer.translatesAutoresizingMaskIntoConstraints = false
+        // Rail container
+        railContainer.translatesAutoresizingMaskIntoConstraints = false
+        railContainer.wantsLayer = true
+        railContainer.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.02).cgColor
+        railContainer.layer?.borderColor = NSColor.separatorColor.cgColor
+        railContainer.layer?.borderWidth = 1.0
 
-        tabStackView.orientation = .horizontal
-        tabStackView.spacing = 6
-        tabStackView.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
-        tabStackView.translatesAutoresizingMaskIntoConstraints = false
-        tabStackView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // Scroll view for rail
+        railScrollView.translatesAutoresizingMaskIntoConstraints = false
+        railScrollView.hasVerticalScroller = true
+        railScrollView.drawsBackground = false
+        railScrollView.borderType = .noBorder
 
-        tabScrollView.hasHorizontalScroller = true
-        tabScrollView.drawsBackground = false
-        tabScrollView.translatesAutoresizingMaskIntoConstraints = false
-        tabScrollView.borderType = .noBorder
+        // Stack view vertical
+        railStackView.orientation = .vertical
+        railStackView.alignment = .centerX
+        railStackView.spacing = 8
+        railStackView.edgeInsets = NSEdgeInsets(top: 8, left: 6, bottom: 8, right: 6)
+        railStackView.translatesAutoresizingMaskIntoConstraints = false
 
-        // Create a document container for the scroll view and add the tabStack inside it.
+        // Put stack into docView for scroll
         let docView = NSView()
         docView.translatesAutoresizingMaskIntoConstraints = false
-        docView.addSubview(tabStackView)
-        tabStackView.translatesAutoresizingMaskIntoConstraints = false
-        tabStackView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        docView.addSubview(railStackView)
+        railScrollView.documentView = docView
 
-        tabScrollView.documentView = docView
-
-        newTabButton.bezelStyle = .texturedRounded
-        newTabButton.target = self
-        newTabButton.action = #selector(newTabPressed(_:))
-        newTabButton.setContentHuggingPriority(.required, for: .horizontal)
-        newTabButton.translatesAutoresizingMaskIntoConstraints = false
-
-        // Address label
-        addressLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        addressLabel.lineBreakMode = .byTruncatingMiddle
-        addressLabel.translatesAutoresizingMaskIntoConstraints = false
-        addressLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-
-        // Content area
-        contentContainer.translatesAutoresizingMaskIntoConstraints = false
-
-        // Layout - use a vertical stack so contentContainer expands correctly
-        // Layout using explicit constraints so contentContainer fills available space
-        tabBarContainer.translatesAutoresizingMaskIntoConstraints = false
-        tabBarContainer.addSubview(tabScrollView)
-        tabBarContainer.addSubview(newTabButton)
-        content.addSubview(tabBarContainer)
-        content.addSubview(addressLabel)
-        content.addSubview(contentContainer)
-
-        // fixed heights
-        tabBarContainer.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        addressLabel.heightAnchor.constraint(equalToConstant: 18).isActive = true
-
-        // make contentContainer flexible
-        contentContainer.setContentHuggingPriority(.defaultLow, for: .vertical)
-        contentContainer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        // Content container
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.wantsLayer = true
         contentContainer.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
+        content.addSubview(railContainer)
+        content.addSubview(contentContainer)
+        railContainer.addSubview(railScrollView)
+
         NSLayoutConstraint.activate([
-            tabBarContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            tabBarContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            tabBarContainer.topAnchor.constraint(equalTo: content.topAnchor),
+            // Left rail fixed width
+            railContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            railContainer.topAnchor.constraint(equalTo: content.topAnchor),
+            railContainer.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            railContainer.widthAnchor.constraint(equalToConstant: railWidth),
 
-            addressLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 8),
-            addressLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -8),
-            addressLabel.topAnchor.constraint(equalTo: tabBarContainer.bottomAnchor, constant: 6),
+            railScrollView.leadingAnchor.constraint(equalTo: railContainer.leadingAnchor),
+            railScrollView.trailingAnchor.constraint(equalTo: railContainer.trailingAnchor),
+            railScrollView.topAnchor.constraint(equalTo: railContainer.topAnchor),
+            railScrollView.bottomAnchor.constraint(equalTo: railContainer.bottomAnchor),
 
-            contentContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            // Content fills remaining space
+            contentContainer.leadingAnchor.constraint(equalTo: railContainer.trailingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            contentContainer.topAnchor.constraint(equalTo: addressLabel.bottomAnchor, constant: 6),
+            contentContainer.topAnchor.constraint(equalTo: content.topAnchor),
             contentContainer.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
-            tabScrollView.leadingAnchor.constraint(equalTo: tabBarContainer.leadingAnchor, constant: 8),
-            tabScrollView.centerYAnchor.constraint(equalTo: tabBarContainer.centerYAnchor),
-            tabScrollView.trailingAnchor.constraint(equalTo: newTabButton.leadingAnchor, constant: -8),
-            tabScrollView.heightAnchor.constraint(equalTo: tabBarContainer.heightAnchor),
-
-            newTabButton.trailingAnchor.constraint(equalTo: tabBarContainer.trailingAnchor, constant: -8),
-            newTabButton.centerYAnchor.constraint(equalTo: tabBarContainer.centerYAnchor)
+            // constraints for docView and stack
+            railStackView.leadingAnchor.constraint(equalTo: docView.leadingAnchor),
+            railStackView.trailingAnchor.constraint(equalTo: docView.trailingAnchor),
+            railStackView.topAnchor.constraint(equalTo: docView.topAnchor),
+            railStackView.bottomAnchor.constraint(lessThanOrEqualTo: docView.bottomAnchor)
         ])
 
-        // Constrain stack view to the docView and ensure docView width is at least the scrollContent width so it won't collapse.
+        // Clip docView to scroll content width
+        let clip = railScrollView.contentView
         NSLayoutConstraint.activate([
-            tabStackView.leadingAnchor.constraint(equalTo: docView.leadingAnchor),
-            tabStackView.topAnchor.constraint(equalTo: docView.topAnchor),
-            tabStackView.bottomAnchor.constraint(equalTo: docView.bottomAnchor),
-            tabStackView.heightAnchor.constraint(equalTo: docView.heightAnchor),
-
-            // Ensure document view expands to fill the scroll content area (prevents zero width collapse).
-            docView.widthAnchor.constraint(greaterThanOrEqualTo: tabScrollView.contentView.widthAnchor)
+            docView.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+            docView.topAnchor.constraint(equalTo: clip.topAnchor),
+            docView.bottomAnchor.constraint(equalTo: clip.bottomAnchor),
+            docView.widthAnchor.constraint(equalTo: railScrollView.widthAnchor)
         ])
 
-        // Make the docView flexible by giving its width constraint a lower priority so it can grow with content.
-        if let widthConstraint = docView.constraints.first(where: { $0.firstAnchor == docView.widthAnchor }) {
-            widthConstraint.priority = .defaultLow
-        }
-
-        // Initial render of tabs
-        rebuildTabButtons()
-    }
-}
-
-// MARK: - Tab UI handling
-extension BrowserWindowController {
-    @objc private func newTabPressed(_ sender: Any?) {
-        if !TabManager.shared.canCreateTab() {
-            let alert = NSAlert()
-            alert.messageText = "Maximum Tabs Reached"
-            alert.informativeText = "You can have up to 20 tabs open. Close a tab to open a new one."
-            alert.runModal()
-            return
-        }
-
-        if let tab = TabManager.shared.createTab(with: URL(string: "https://example.com")) {
-            attachWebView(tab.webView)
-            rebuildTabButtons()
-        }
+        // Initial empty state view if no sites
+        updateEmptyStateIfNeeded()
     }
 
-    @objc private func tabButtonPressed(_ sender: NSButton) {
-        let idx = sender.tag
-        TabManager.shared.setActiveTab(index: idx)
-    }
-
-    @objc private func closeTabPressed(_ sender: NSButton) {
-        let idx = sender.tag
-        TabManager.shared.closeTab(at: idx)
-        rebuildTabButtons()
-        // update displayed webview
+    // MARK: - UI updates
+    @objc private func sitesChanged() {
+        rebuildRailButtons()
+        attachAllWebViewsIfNeeded()
+        // If last active site got removed, SiteTabManager will have set activeIndex appropriately; update UI.
         activeTabChanged()
     }
 
-    private func attachWebView(_ webView: WKWebView) {
-        // Remove existing
-        for sub in contentContainer.subviews { sub.removeFromSuperview() }
-        webView.translatesAutoresizingMaskIntoConstraints = false
-        webView.wantsLayer = true
-        webView.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        contentContainer.addSubview(webView)
-
-        // Try using Auto Layout first
-        let constraints = [
-            webView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
-            webView.topAnchor.constraint(equalTo: contentContainer.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor)
-        ]
-        NSLayoutConstraint.activate(constraints)
-        webView.navigationDelegate = self
-
-        // Force layout so we can quickly observe frames
-        contentContainer.layoutSubtreeIfNeeded()
-        webView.layoutSubtreeIfNeeded()
-        print("Attaching webView (post-layout); url=\(webView.url?.absoluteString ?? "(nil)") frame=\(webView.frame) container=\(contentContainer.frame)")
-        vaakaLog("Attaching webView (post-layout); url=\(webView.url?.absoluteString ?? "(nil)") frame=\(webView.frame) container=\(contentContainer.frame)")
-
-        // If height is still zero (autolayout hasn't resolved), fallback to manual frame sizing
-        if contentContainer.frame.height <= 1 {
-            NSLayoutConstraint.deactivate(constraints)
-            webView.translatesAutoresizingMaskIntoConstraints = true
-            let contentBounds = contentContainer.bounds
-            var manualFrame = contentBounds
-            if manualFrame.height <= 1 {
-                // compute based on window
-                if let w = self.window, let contentView = w.contentView {
-                    let contentRect = w.contentLayoutRect
-                    let topReserved = CGFloat(36 + 6 + 18 + 6) // tabbar + gap + address + gap
-                    let width = contentRect.width
-                    let height = max(200, contentRect.height - topReserved)
-
-                    let frameInWindow = CGRect(x: contentRect.minX, y: contentRect.minY, width: width, height: height)
-
-                    // Add webView directly to window contentView as a fallback
-                    webView.removeFromSuperview()
-                    webView.translatesAutoresizingMaskIntoConstraints = true
-                    webView.frame = frameInWindow
-                    webView.autoresizingMask = [.width, .height]
-                    contentView.addSubview(webView)
-                    contentView.layoutSubtreeIfNeeded()
-
-                    print("Attaching webView (window fallback); frame=\(webView.frame) contentView=\(contentView.frame)")
-                    vaakaLog("Attaching webView (window fallback); frame=\(webView.frame) contentView=\(contentView.frame)")
-                    return
-                } else {
-                    manualFrame.size.height = 400
-                    manualFrame.size.width = 800
-                }
-            }
-            webView.frame = manualFrame
-            webView.autoresizingMask = [.width, .height]
-            contentContainer.addSubview(webView)
-            contentContainer.layoutSubtreeIfNeeded()
-            print("Attaching webView (manual layout); frame=\(webView.frame) container=\(contentContainer.frame)")
-            vaakaLog("Attaching webView (manual layout); frame=\(webView.frame) container=\(contentContainer.frame)")
-        }
-    }
-
     @objc private func tabsChanged() {
-        print("Tabs changed: count=\(TabManager.shared.tabs.count)")
-        vaakaLog("Tabs changed: count=\(TabManager.shared.tabs.count)")
-        rebuildTabButtons()
+        rebuildRailButtons()
     }
 
     @objc private func activeTabChanged() {
-        print("Active tab changed: activeIndex=\(TabManager.shared.activeIndex)")
-        vaakaLog("Active tab changed: activeIndex=\(TabManager.shared.activeIndex)")
-        // attach active web view
-        guard TabManager.shared.tabs.indices.contains(TabManager.shared.activeIndex) else {
-            // no tabs, create a new one
-            if TabManager.shared.tabs.isEmpty {
-                _ = TabManager.shared.createTab(with: URL(string: "https://example.com"))
-                rebuildTabButtons()
-            }
-            return
+        // Update visual active states and visible webview
+        DispatchQueue.main.async {
+            let idx = SiteTabManager.shared.activeIndex
+            self.updateRailSelection(activeIndex: idx)
+            self.setActiveWebViewVisibility(index: idx)
         }
-        let tab = TabManager.shared.tabs[TabManager.shared.activeIndex]
-        attachWebView(tab.webView)
-        addressLabel.stringValue = tab.webView.url?.absoluteString ?? ""
-        rebuildTabButtons()
     }
 
-    private func rebuildTabButtons() {
-        print("Rebuilding tabs: \(TabManager.shared.tabs.map { $0.title.isEmpty ? ($0.url?.host ?? "New Tab") : $0.title })")
-        vaakaLog("Rebuilding tabs: \(TabManager.shared.tabs.map { $0.title.isEmpty ? ($0.url?.host ?? "New Tab") : $0.title })")
-        // Clear
-        tabStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+    private func rebuildRailButtons() {
+        railStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let tabs = SiteTabManager.shared.tabs
+        for (index, tab) in tabs.enumerated() {
+            let item = RailItemView(site: tab.site, index: index, actionTarget: self)
+            railStackView.addArrangedSubview(item)
+            // height to make icons comfortably touch-target
+            item.heightAnchor.constraint(equalToConstant: 44).isActive = true
+            item.widthAnchor.constraint(equalToConstant: railWidth).isActive = true
 
-        for (index, tab) in TabManager.shared.tabs.enumerated() {
-            // Build a tab view with favicon, title and close button + loading spinner
-            let faviconView = NSImageView()
-            faviconView.wantsLayer = true
-            faviconView.translatesAutoresizingMaskIntoConstraints = false
-            faviconView.image = tab.favicon
-            faviconView.imageScaling = .scaleProportionallyUpOrDown
-            faviconView.layer?.cornerRadius = 4
-            faviconView.layer?.masksToBounds = true
-            faviconView.widthAnchor.constraint(equalToConstant: 16).isActive = true
-            faviconView.heightAnchor.constraint(equalToConstant: 16).isActive = true
+            // Diagnostic: log favicon presence on create
+            if let fname = tab.site.favicon {
+                let exists = FaviconFetcher.shared.resourceExistsOnDisk(fname)
+                let loaded = FaviconFetcher.shared.image(forResource: fname) != nil
+                print("[DEBUG] rebuildRailButtons: site.id=\(tab.site.id) favicon=\(fname) exists=\(exists) imageLoadable=\(loaded)")
+            } else {
+                print("[DEBUG] rebuildRailButtons: site.id=\(tab.site.id) favicon=nil")
+            }
+            print("[DEBUG] rebuildRailButtons: created RailItemView for site.id=\(tab.site.id) debug=\(item.debugInfo())")
 
-            let titleLabel = NSTextField(labelWithString: tab.title.isEmpty ? (tab.url?.host ?? "New Tab") : tab.title)
-            titleLabel.lineBreakMode = .byTruncatingTail
-            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        }
+        updateEmptyStateIfNeeded()
+    }
 
-            let spinner = NSProgressIndicator()
-            spinner.style = .spinning
-            spinner.controlSize = .small
-            spinner.isDisplayedWhenStopped = false
-            spinner.translatesAutoresizingMaskIntoConstraints = false
-            if tab.isLoading { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
+    private func updateRailSelection(activeIndex: Int) {
+        for case let item as RailItemView in railStackView.arrangedSubviews {
+            item.updateActiveState(isActive: item.index == activeIndex)
+        }
+    }
 
-            // close button overlay
-            let close = NSButton(title: "✕", target: self, action: #selector(closeTabPressed(_:)))
-            close.tag = index
-            close.bezelStyle = .regularSquare
-            close.font = NSFont.systemFont(ofSize: 10)
-            close.translatesAutoresizingMaskIntoConstraints = false
-            close.setContentHuggingPriority(.required, for: .horizontal)
-            close.setContentCompressionResistancePriority(.required, for: .horizontal)
-            close.widthAnchor.constraint(equalToConstant: 18).isActive = true
-
-            let contentStack = NSStackView(views: [faviconView, titleLabel])
-            contentStack.orientation = .horizontal
-            contentStack.spacing = 6
-            contentStack.alignment = .centerY
-            contentStack.translatesAutoresizingMaskIntoConstraints = false
-
-            let container = NSView()
-            container.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(contentStack)
-            container.addSubview(spinner)
-            container.addSubview(close)
-
+    private func attachAllWebViewsIfNeeded() {
+        let tabs = SiteTabManager.shared.tabs
+        for tab in tabs {
+            if webViewsAttached.contains(tab.site.id) { continue }
+            // Attach once
+            let webView = tab.webView
+            webView.translatesAutoresizingMaskIntoConstraints = false
+            contentContainer.addSubview(webView)
             NSLayoutConstraint.activate([
-                contentStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
-                contentStack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-
-                spinner.leadingAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: 6),
-                spinner.centerYAnchor.constraint(equalTo: contentStack.centerYAnchor),
-
-                close.leadingAnchor.constraint(equalTo: spinner.trailingAnchor, constant: 6),
-                close.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -4),
-                close.centerYAnchor.constraint(equalTo: contentStack.centerYAnchor)
+                webView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+                webView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+                webView.topAnchor.constraint(equalTo: contentContainer.topAnchor),
+                webView.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor)
             ])
+            webView.isHidden = true
+            webViewsAttached.insert(tab.site.id)
+            // Start navigation only after the webview is attached to the view hierarchy
+            tab.loadStartURLIfNeeded()
+        }
+    }
 
-            // Make the container clickable by adding a button overlay
-            let clickButton = NSButton(title: "", target: self, action: #selector(tabButtonPressed(_:)))
-            clickButton.isBordered = false
-            clickButton.translatesAutoresizingMaskIntoConstraints = false
-            clickButton.tag = index
-            container.addSubview(clickButton, positioned: .below, relativeTo: contentStack)
-            NSLayoutConstraint.activate([
-                clickButton.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                clickButton.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-                clickButton.topAnchor.constraint(equalTo: container.topAnchor),
-                clickButton.bottomAnchor.constraint(equalTo: container.bottomAnchor)
-            ])
+    private func setActiveWebViewVisibility(index: Int) {
+        let tabs = SiteTabManager.shared.tabs
+        for (i, tab) in tabs.enumerated() {
+            tab.webView.isHidden = (i != index)
+        }
+    }
 
-            // Ensure the container has an intrinsic width based on its children
-            container.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            tabStackView.addArrangedSubview(container)
+    private func updateEmptyStateIfNeeded() {
+        // Remove any previous empty state view
+        if SiteManager.shared.sites.isEmpty {
+            // show an empty state inside content container
+            contentContainer.subviews.forEach { $0.isHidden = true }
+            if contentContainer.subviews.first(where: { $0.identifier?.rawValue == "EmptyStateView" }) == nil {
+                let v = EmptyStateView(frame: .zero)
+                v.translatesAutoresizingMaskIntoConstraints = false
+                v.identifier = NSUserInterfaceItemIdentifier("EmptyStateView")
+                contentContainer.addSubview(v)
+                NSLayoutConstraint.activate([
+                    v.centerXAnchor.constraint(equalTo: contentContainer.centerXAnchor),
+                    v.centerYAnchor.constraint(equalTo: contentContainer.centerYAnchor),
+                    v.widthAnchor.constraint(equalToConstant: 320)
+                ])
+                v.openSettingsAction = { [weak self] in
+                    self?.openPreferences()
+                }
+            }
+        } else {
+            // ensure content container subviews (including empty state) are visible state
+            contentContainer.subviews.forEach { if $0.tag != 0xE11 { $0.isHidden = false } }
+            if let empty = contentContainer.viewWithTag(0xE11) { empty.removeFromSuperview() }
+        }
+    }
+
+    // MARK: - Loading state notifications
+    @objc private func siteDidStartLoading(_ note: Notification) {
+        guard let id = note.object as? String else { return }
+        for case let item as RailItemView in railStackView.arrangedSubviews where item.site.id == id {
+            item.setLoading(true)
+        }
+    }
+
+    @objc private func siteDidFinishLoading(_ note: Notification) {
+        guard let id = note.object as? String else { return }
+        for case let item as RailItemView in railStackView.arrangedSubviews where item.site.id == id {
+            item.setLoading(false)
+        }
+    }
+
+    // MARK: - Keyboard handling
+    private func handleKeyEvent(_ evt: NSEvent) -> NSEvent? {
+        // Ctrl+Tab / Ctrl+Shift+Tab
+        if evt.modifierFlags.contains(.control) && evt.keyCode == 48 { // tab keycode
+            if evt.modifierFlags.contains(.shift) {
+                // previous
+                let idx = SiteTabManager.shared.activeIndex
+                let prev = (idx - 1 + SiteTabManager.shared.tabs.count) % max(1, SiteTabManager.shared.tabs.count)
+                SiteTabManager.shared.setActiveIndex(prev)
+            } else {
+                // next
+                let idx = SiteTabManager.shared.activeIndex
+                let next = (idx + 1) % max(1, SiteTabManager.shared.tabs.count)
+                SiteTabManager.shared.setActiveIndex(next)
+            }
+            return nil // consume
         }
 
-        // Ensure the newTabButton is inside the tabBarContainer
-        if newTabButton.superview !== tabBarContainer {
-            newTabButton.removeFromSuperview()
-            tabBarContainer.addSubview(newTabButton)
-            // Reinforce constraints to keep it positioned correctly
+        // Cmd+1..Cmd+9
+        if evt.modifierFlags.contains(.command), let chars = evt.charactersIgnoringModifiers, let first = chars.first, let digit = Int(String(first)), (1...9).contains(digit) {
+            let idx = digit - 1
+            if idx < SiteTabManager.shared.tabs.count {
+                SiteTabManager.shared.setActiveIndex(idx)
+                return nil
+            }
+        }
+        return evt
+    }
+
+    // MARK: - Actions
+    fileprivate func railItemClicked(_ index: Int) {
+        SiteTabManager.shared.setActiveIndex(index)
+    }
+
+    fileprivate func openPreferences() {
+        let prefs = PreferencesWindowController()
+        prefs.showWindow(self)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - Context menu helpers
+    fileprivate func showContextMenu(for site: Site, at pointInWindow: NSPoint) {
+        let menu = NSMenu(title: "Site")
+        menu.addItem(withTitle: "Reload Site", action: #selector(reloadSite(_:)), keyEquivalent: "").representedObject = site
+        menu.addItem(withTitle: "Open in Default Browser", action: #selector(openInBrowser(_:)), keyEquivalent: "").representedObject = site
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Site Settings…", action: #selector(openSiteSettings(_:)), keyEquivalent: "").representedObject = site
+        guard let event = NSApp.currentEvent, let win = self.window, let content = win.contentView else {
+            // Unable to show context menu safely
+            return
+        }
+        NSMenu.popUpContextMenu(menu, with: event, for: content)
+    }
+
+    @objc private func reloadSite(_ sender: NSMenuItem) {
+        guard let site = sender.representedObject as? Site else { return }
+        if let idx = SiteTabManager.shared.tabs.firstIndex(where: { $0.site.id == site.id }) {
+            SiteTabManager.shared.tabs[idx].webView.reload()
+        }
+    }
+
+    @objc private func openInBrowser(_ sender: NSMenuItem) {
+        guard let site = sender.representedObject as? Site else { return }
+        NSWorkspace.shared.open(site.url)
+    }
+
+    @objc private func openSiteSettings(_ sender: NSMenuItem) {
+        openPreferences()
+    }
+
+    // MARK: - Helpers
+    private func ensureWebViewsAndSetActive(index: Int) {
+        attachAllWebViewsIfNeeded()
+        setActiveWebViewVisibility(index: index)
+    }
+
+    // MARK: - Empty state view
+    private final class EmptyStateView: NSView {
+        var openSettingsAction: (() -> Void)?
+        private let messageLabel = NSTextField(labelWithString: "No sites configured\nAdd a site in Settings to begin.")
+        private let button = NSButton(title: "Open Settings", target: nil, action: nil)
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setup()
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        private func setup() {
+            wantsLayer = true
+            layer?.backgroundColor = NSColor.clear.cgColor
+            messageLabel.alignment = .center
+            messageLabel.font = NSFont.systemFont(ofSize: 14)
+            messageLabel.translatesAutoresizingMaskIntoConstraints = false
+            button.bezelStyle = .rounded
+            button.target = self
+            button.action = #selector(openPressed)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(messageLabel)
+            addSubview(button)
             NSLayoutConstraint.activate([
-                newTabButton.trailingAnchor.constraint(equalTo: tabBarContainer.trailingAnchor, constant: -8),
-                newTabButton.centerYAnchor.constraint(equalTo: tabBarContainer.centerYAnchor)
+                messageLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+                messageLabel.topAnchor.constraint(equalTo: topAnchor),
+                button.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 12),
+                button.centerXAnchor.constraint(equalTo: centerXAnchor),
+                button.bottomAnchor.constraint(equalTo: bottomAnchor)
             ])
+        }
+        @objc private func openPressed() { openSettingsAction?() }
+    }
+
+    // MARK: - Site item view
+    private final class RailItemView: NSView {
+        let site: Site
+        let index: Int
+        private let imageView = NSImageView()
+        private let indicator = NSView()
+        private let spinner = NSProgressIndicator()
+        private var tracking: NSTrackingArea?
+        private weak var actionTarget: BrowserWindowController?
+
+        init(site: Site, index: Int, actionTarget: BrowserWindowController) {
+            self.site = site
+            self.index = index
+            self.actionTarget = actionTarget
+            super.init(frame: .zero)
+            setup()
+        }
+
+        func debugInfo() -> String {
+            let hasImage = (imageView.image != nil)
+            let size = imageView.image?.size.debugDescription ?? "nil"
+            return "hasImage=\(hasImage) hidden=\(imageView.isHidden) alpha=\(imageView.alphaValue) size=\(size)"
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+        private var reloadRetries = 0
+        // Track the last known image presence to detect unexpected transitions
+        private var lastKnownHasImage = false
+
+        // Centralized image & visibility mutators with logging
+        private func applyImage(_ img: NSImage?, reason: String) {
+            let beforeHas = (imageView.image != nil)
+            let beforeSize = imageView.image?.size.debugDescription ?? "nil"
+            imageView.image = img
+            let afterHas = (img != nil)
+            print("[DEBUG] RailItemView.applyImage: site.id=\(site.id) reason=\(reason) beforeHas=\(beforeHas) beforeSize=\(beforeSize) afterHas=\(afterHas) afterSize=\(img?.size.debugDescription ?? "nil")")
+            if beforeHas && !afterHas {
+                print("[WARN] RailItemView.applyImage: site.id=\(site.id) image unexpectedly removed by reason=\(reason)")
+            }
+            if lastKnownHasImage != afterHas {
+                print("[TRACE] RailItemView.hasImageTransition: site.id=\(site.id) from=\(lastKnownHasImage) to=\(afterHas) reason=\(reason)")
+            }
+            lastKnownHasImage = afterHas
+        }
+        private func setImageHidden(_ hidden: Bool, reason: String) {
+            let had = imageView.image != nil
+            imageView.isHidden = hidden
+            print("[DEBUG] RailItemView.setImageHidden: site.id=\(site.id) hidden=\(hidden) reason=\(reason) debug=\(debugInfo())")
+            // If we have no image but are hidden==false, that's suspicious (we show nothing)
+            if !hidden && !had && imageView.image == nil {
+                print("[WARN] RailItemView.setImageHidden: site.id=\(site.id) making visible but no image present (possible blank rail)")
+            }
+        }
+        private func setImageAlpha(_ alpha: CGFloat, reason: String) {
+            imageView.alphaValue = alpha
+            print("[DEBUG] RailItemView.setImageAlpha: site.id=\(site.id) alpha=\(alpha) reason=\(reason) debug=\(debugInfo())")
+        }
+
+        private func setup() {
+            translatesAutoresizingMaskIntoConstraints = false
+            wantsLayer = true
+            layer?.cornerRadius = 6
+
+            indicator.wantsLayer = true
+            indicator.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+            indicator.translatesAutoresizingMaskIntoConstraints = false
+            indicator.isHidden = true
+
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            imageView.imageScaling = .scaleProportionallyUpOrDown
+
+            spinner.style = .spinning
+            spinner.controlSize = .small
+            spinner.translatesAutoresizingMaskIntoConstraints = false
+            spinner.isDisplayedWhenStopped = false
+            spinner.isHidden = true
+            spinner.alphaValue = 0.0
+            imageView.alphaValue = 1.0
+
+            addSubview(indicator)
+            addSubview(imageView)
+            addSubview(spinner)
+
+            NSLayoutConstraint.activate([
+                indicator.leadingAnchor.constraint(equalTo: leadingAnchor),
+                indicator.widthAnchor.constraint(equalToConstant: 3),
+                indicator.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+                indicator.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+
+                imageView.centerXAnchor.constraint(equalTo: centerXAnchor, constant: 4),
+                imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+                imageView.widthAnchor.constraint(equalToConstant: 24),
+                imageView.heightAnchor.constraint(equalToConstant: 24),
+
+                // Place spinner in the exact center of the imageView so it replaces the icon visually
+                spinner.centerXAnchor.constraint(equalTo: imageView.centerXAnchor),
+                spinner.centerYAnchor.constraint(equalTo: imageView.centerYAnchor)
+            ])
+
+            // Accessibility: make this rail item an accessibility element (acts like a button)
+            self.setAccessibilityElement(true)
+            self.setAccessibilityRole(.button)
+            self.setAccessibilityLabel(site.name)
+
+            // set tooltip
+            self.toolTip = site.name
+
+            // Helpers to centralize image/visibility changes with logging
+            func applyImage(_ img: NSImage?, reason: String) {
+                let beforeHas = (imageView.image != nil)
+                let beforeSize = imageView.image?.size.debugDescription ?? "nil"
+                imageView.image = img
+                print("[DEBUG] RailItemView.applyImage: site.id=\(site.id) reason=\(reason) beforeHas=\(beforeHas) beforeSize=\(beforeSize) afterHas=\(img != nil) afterSize=\(img?.size.debugDescription ?? "nil")")
+            }
+            func setImageHidden(_ hidden: Bool, reason: String) {
+                imageView.isHidden = hidden
+                print("[DEBUG] RailItemView.setImageHidden: site.id=\(site.id) hidden=\(hidden) reason=\(reason) debug=\(debugInfo())")
+            }
+            func setImageAlpha(_ alpha: CGFloat, reason: String) {
+                imageView.alphaValue = alpha
+                print("[DEBUG] RailItemView.setImageAlpha: site.id=\(site.id) alpha=\(alpha) reason=\(reason) debug=\(debugInfo())")
+            }
+
+            // Load favicon (SVG preferred, PNG allowed, generated fallback)
+            if let name = site.favicon, let img = FaviconFetcher.shared.image(forResource: name) {
+                applyImage(img, reason: "setup:loaded-resource:\(name)")
+            } else if let host = site.url.host {
+                let mono = FaviconFetcher.shared.generateMonoIcon(for: host)
+                applyImage(mono, reason: "setup:generated-mono")
+            }
+            // Ensure image view is visible and properly configured even if there was no icon
+            setImageHidden(false, reason: "setup:ensure-visible")
+            setImageAlpha(1.0, reason: "setup:ensure-alpha")
+            if imageView.image == nil, let host = site.url.host {
+                // Final safety: show a generated mono icon if nothing else is present
+                applyImage(FaviconFetcher.shared.generateMonoIcon(for: host), reason: "setup:final-safety-mono-for-host:\(host)")
+            }
+
+            // Click handling
+            let click = NSClickGestureRecognizer(target: self, action: #selector(clicked(_:)))
+            addGestureRecognizer(click)
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let t = tracking { removeTrackingArea(t) }
+            tracking = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self, userInfo: nil)
+            if let t = tracking { addTrackingArea(t) }
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            layer?.backgroundColor = NSColor.selectedControlColor.withAlphaComponent(0.06).cgColor
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            layer?.backgroundColor = NSColor.clear.cgColor
+        }
+
+        func updateActiveState(isActive: Bool) {
+            indicator.isHidden = !isActive
+            if isActive {
+                layer?.backgroundColor = NSColor.selectedControlColor.withAlphaComponent(0.12).cgColor
+            } else {
+                layer?.backgroundColor = NSColor.clear.cgColor
+            }
+        }
+
+        private var loadingTimeoutWorkItem: DispatchWorkItem?
+
+        func setLoading(_ l: Bool) {
+            // Cancel any existing timeout when state changes
+            loadingTimeoutWorkItem?.cancel()
+            loadingTimeoutWorkItem = nil
+
+            // Announce to assistive tech
+            if l {
+                NSAccessibility.post(element: self, notification: .announcementRequested, userInfo: [NSAccessibility.NotificationUserInfoKey.announcement: "Loading \(site.name)", NSAccessibility.NotificationUserInfoKey.priority: NSAccessibilityPriorityLevel.medium])
+
+                spinner.isHidden = false
+                spinner.alphaValue = 0.0
+                spinner.startAnimation(nil)
+                // cross-fade
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0.18
+                    imageView.animator().alphaValue = 0.0
+                    spinner.animator().alphaValue = 1.0
+                }, completionHandler: {
+                    self.setImageHidden(true, reason: "setLoading:start:anim-complete")
+                    print("[DEBUG] RailItemView.setLoading(start) completed: site.id=\(self.site.id) image=nil?=\(self.imageView.image == nil)")
+                })
+
+                // Schedule a fallback in case loading stalls: show a mono icon and stop spinner after a short timeout
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self = self else { return }
+                    if self.spinner.isHidden == false {
+                        // Apply fallback
+                        if let host = self.site.url.host {
+                            self.applyImage(FaviconFetcher.shared.generateMonoIcon(for: host), reason: "loadingTimeout:applied-fallback-mono-for:\(host)")
+                            self.setImageHidden(false, reason: "loadingTimeout:ensure-visible")
+                            self.setImageAlpha(1.0, reason: "loadingTimeout:set-alpha-1")
+                            self.spinner.stopAnimation(nil)
+                            self.spinner.isHidden = true
+                            print("[DEBUG] RailItemView.loadingTimeout: applied fallback mono icon for site.id=\(self.site.id) host=\(host)")
+                        }
+                    }
+                }
+                self.loadingTimeoutWorkItem = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+
+            } else {
+                NSAccessibility.post(element: self, notification: .announcementRequested, userInfo: [NSAccessibility.NotificationUserInfoKey.announcement: "\(site.name) loaded", NSAccessibility.NotificationUserInfoKey.priority: NSAccessibilityPriorityLevel.low])
+
+                // Ensure we have the most up-to-date favicon image (in case it changed while loading)
+                if let name = site.favicon, let img = FaviconFetcher.shared.image(forResource: name) {
+                    self.applyImage(img, reason: "setLoading:refresh-resource:\(name)")
+                } else if let host = site.url.host {
+                    self.applyImage(FaviconFetcher.shared.generateMonoIcon(for: host), reason: "setLoading:generated-mono-for:\(host)")
+                }
+
+                self.setImageHidden(false, reason: "setLoading:finish:ensure-visible")
+                self.setImageAlpha(0.0, reason: "setLoading:finish:alpha-0")
+                // cross-fade back
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0.18
+                    spinner.animator().alphaValue = 0.0
+                    imageView.animator().alphaValue = 1.0
+                }, completionHandler: {
+                    self.spinner.stopAnimation(nil)
+                    self.spinner.isHidden = true
+                    print("[DEBUG] RailItemView.setLoading(finish) completed: site.id=\(self.site.id) image=nil?=\(self.imageView.image == nil) size=\(self.imageView.image?.size.debugDescription ?? "nil")")
+
+                    // Ensure any pending loading-timeout fallback is cancelled now that finish completed
+                    self.loadingTimeoutWorkItem?.cancel()
+                    self.loadingTimeoutWorkItem = nil
+
+                    // If the image is nil after finishing animation, first apply an immediate fallback mono icon
+                    if self.imageView.image == nil {
+                        if let host = self.site.url.host {
+                            self.applyImage(FaviconFetcher.shared.generateMonoIcon(for: host), reason: "setLoading:immediate-fallback-mono-for:\(host)")
+                            self.setImageHidden(false, reason: "setLoading:immediate-fallback-ensure-visible")
+                            self.setImageAlpha(1.0, reason: "setLoading:immediate-fallback-alpha-1")
+                            print("[DEBUG] RailItemView.setLoading: immediate fallback mono icon applied for site.id=\(self.site.id) host=\(host)")
+                        }
+                    }
+
+                    // Force final visible state (defensive: ensure the icon is not left invisible due to interrupted animation)
+                    self.setImageHidden(false, reason: "setLoading:finish:ensure-visible-final")
+                    self.setImageAlpha(1.0, reason: "setLoading:finish:force-alpha-1")
+
+                    // Also attempt a small number of retries with delay to account for file write races or transient failures
+                    if self.imageView.image == nil, self.reloadRetries < 3 {
+                        self.reloadRetries += 1
+                        let attempt = self.reloadRetries
+                        print("[DEBUG] RailItemView.setLoading: scheduling retry \(attempt) for site.id=\(self.site.id)")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                            if let name = self.site.favicon, let img = FaviconFetcher.shared.image(forResource: name) {
+                                self.applyImage(img, reason: "retry:loaded-resource:\(name):attempt:\(attempt)")
+                                self.setImageHidden(false, reason: "retry:ensure-visible")
+                                print("[DEBUG] RailItemView.retry: succeeded loading favicon for site.id=\(self.site.id) on attempt=\(attempt)")
+                                // Ensure final visible state after retry succeeds
+                                self.setImageAlpha(1.0, reason: "retry:force-alpha-1")
+                            } else {
+                                print("[DEBUG] RailItemView.retry: still no favicon for site.id=\(self.site.id) on attempt=\(attempt)")
+                            }
+                        }
+                    } else {
+                        self.reloadRetries = 0
+                    }
+                })
+            }
+        }
+
+        @objc private func clicked(_ g: NSClickGestureRecognizer) {
+            // Treat clicks as activation; right-click is handled via rightMouseDown
+            actionTarget?.railItemClicked(index)
+        }
+
+        override func rightMouseDown(with event: NSEvent) {
+            actionTarget?.showContextMenu(for: site, at: event.locationInWindow)
         }
     }
 }
 
-// MARK: - WKNavigationDelegate
-extension BrowserWindowController: WKNavigationDelegate, NSWindowDelegate {
+// Simplified window delegate to keep layout updated when window becomes key or resizes
+extension BrowserWindowController: NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) {
-        print("windowDidBecomeKey - refreshing active tab UI")
-        vaakaLog("windowDidBecomeKey - refreshing active tab UI")
-        // Re-attach after window becomes key so layout is established
         DispatchQueue.main.async {
             self.contentContainer.layoutSubtreeIfNeeded()
             self.activeTabChanged()
         }
     }
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        if let idx = TabManager.shared.tabs.firstIndex(where: { $0.webView == webView }) {
-            let tab = TabManager.shared.tabs[idx]
-            tab.isLoading = true
-            DispatchQueue.main.async { tab.fetchFaviconIfNeeded() }
-            rebuildTabButtons()
-        }
-        print("webView didStartProvisionalNavigation: url=\(webView.url?.absoluteString ?? "(nil)")")
-        vaakaLog("webView didStartProvisionalNavigation: url=\(webView.url?.absoluteString ?? "(nil)")")
-    }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if let idx = TabManager.shared.tabs.firstIndex(where: { $0.webView == webView }) {
-            let tab = TabManager.shared.tabs[idx]
-            tab.isLoading = false
-            tab.title = webView.title ?? webView.url?.host ?? ""
-            tab.url = webView.url
-            DispatchQueue.main.async { tab.fetchFaviconIfNeeded() }
-            rebuildTabButtons()
-        }
-        print("webView didFinish: url=\(webView.url?.absoluteString ?? "(nil)")")
-        vaakaLog("webView didFinish: url=\(webView.url?.absoluteString ?? "(nil)")")
-    }
-
-    func webView(_ webView: WKWebView,
-                 decidePolicyFor navigationAction: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-
-        guard let url = navigationAction.request.url else {
-            decisionHandler(.cancel)
-            return
-        }
-
-        // Allow data/blob
-        if url.scheme == "data" || url.scheme == "blob" {
-            decisionHandler(.allow)
-            return
-        }
-
-        if WhitelistManager.shared.isWhitelisted(url: url) {
-            decisionHandler(.allow)
-        } else {
-            decisionHandler(.cancel)
-            if webView.canGoBack { webView.goBack() }
-            NSWorkspace.shared.open(url)
-        }
+    func windowDidResize(_ notification: Notification) {
+        // Nothing special for now; views use Auto Layout
     }
 }

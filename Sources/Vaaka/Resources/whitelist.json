@@ -1,15 +1,23 @@
 {
   "version": "1.0",
-  "simple_domains": ["example.com", "github.com", "google.com"],
-  "regex_patterns": [],
-  "builtin_oauth": [
-    "accounts.google.com",
-    "login.microsoft.com",
-    "login.microsoftonline.com",
-    "appleid.apple.com",
-    "github.com",
-    "facebook.com",
-    "twitter.com",
-    "linkedin.com"
+  "sites": [
+    {
+      "id": "example",
+      "name": "Example",
+      "url": "https://example.com",
+      "favicon": null
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "url": "https://github.com",
+      "favicon": null
+    },
+    {
+      "id": "google",
+      "name": "Google",
+      "url": "https://www.google.com",
+      "favicon": null
+    }
   ]
 }

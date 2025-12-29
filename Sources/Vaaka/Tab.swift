@@ -1,39 +1,30 @@
 import Foundation
 import WebKit
+import AppKit
 
-struct TabSettings: Codable {
-    var javascriptEnabled: Bool = true
-    var zoomLevel: Double = 1.0
-
-    static var `default`: TabSettings { .init() }
-}
-
-final class Tab: NSObject {
-    let identifier: UUID = .init()
+/// Represents a loaded Site tab: one `WKWebView` per `Site`.
+final class SiteTab: NSObject {
+    let site: Site
     let webView: WKWebView
-    var title: String = ""
-    var url: URL?
-    var favicon: NSImage?
-    var isLoading: Bool = false {
-        didSet { NotificationCenter.default.post(name: Notification.Name("Vaaka.TabUpdated"), object: self) }
-    }
-    var settings: TabSettings = .default
-    var lastActiveTime: Date = Date()
-    var isSuspended: Bool = false
-    var pendingURL: URL?
+    // Keep a strong reference to the navigation delegate used to enforce whitelist
+    var navigationDelegateStored: WKNavigationDelegate?
+    var uiDelegateStored: WKUIDelegate?
 
-    init(configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
+    private var hasLoadedStartURL: Bool = false
+
+    init(site: Site, configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
+        self.site = site
         self.webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
+        // Do not load the start URL immediately — wait until the WebView is attached to the window/content view.
+        // This avoids spurious `open` attempts while the WebView is not yet part of the responder/window chain.
     }
 
-    func fetchFaviconIfNeeded() {
-        guard favicon == nil, let u = url else { return }
-        FaviconFetcher.shared.fetchFavicon(for: u) { img in
-            DispatchQueue.main.async {
-                self.favicon = img
-                NotificationCenter.default.post(name: Notification.Name("Vaaka.TabUpdated"), object: self)
-            }
-        }
+    /// Load the site's start URL if it hasn't been loaded already. Safe to call multiple times.
+    func loadStartURLIfNeeded() {
+        guard !hasLoadedStartURL else { return }
+        hasLoadedStartURL = true
+        let req = URLRequest(url: site.url)
+        webView.load(req)
     }
 }

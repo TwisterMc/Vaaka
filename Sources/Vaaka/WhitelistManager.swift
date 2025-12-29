@@ -1,97 +1,187 @@
 import Foundation
 
-class WhitelistManager {
-    static let shared = WhitelistManager()
+extension Notification.Name {
+    static let SitesChanged = Notification.Name("Vaaka.SitesChanged")
+}
 
-    private(set) var simpleDomains: [String] = []
-    private(set) var regexPatterns: [String] = []
-    let builtinOAuth: [String] = [
-        "accounts.google.com",
-        "login.microsoft.com",
-        "login.microsoftonline.com",
-        "appleid.apple.com",
-        "github.com",
-        "facebook.com",
-        "twitter.com",
-        "linkedin.com"
-    ]
+/// A site configuration for Vaaka. One `Site` maps to exactly one vertical tab.
+public struct Site: Codable, Equatable {
+    public let id: String
+    public let name: String
+    public let url: URL
+    public let favicon: String? // relative resource name (e.g. "github.svg") or nil
+
+    public init(id: String, name: String, url: URL, favicon: String?) {
+        self.id = id
+        self.name = name
+        self.url = url
+        self.favicon = favicon
+    }
+}
+
+/// Manages the ordered, settings-driven list of Sites. This class strictly reads the
+/// bundled `whitelist.json` (or the persisted file) using the new site-based schema
+/// and exposes an ordered, immutable list of sites at runtime.
+final class SiteManager {
+    static let shared = SiteManager()
+
+    private(set) var sites: [Site] = [] {
+        didSet { NotificationCenter.default.post(name: .SitesChanged, object: self) }
+    }
+
+    private struct FileSchema: Codable {
+        let version: String
+        let sites: [Site]
+    }
 
     private var fileURL: URL {
         let fm = FileManager.default
-        let appSupport = try! fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let vaakaDir = appSupport.appendingPathComponent("Vaaka", isDirectory: true)
+        // Prefer the Application Support directory, but fall back to temporary directory if unavailable
+        if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let vaakaDir = appSupport.appendingPathComponent("Vaaka", isDirectory: true)
+            try? fm.createDirectory(at: vaakaDir, withIntermediateDirectories: true)
+            return vaakaDir.appendingPathComponent("whitelist.json")
+        }
+        // Fallback
+        let tmp = fm.temporaryDirectory
+        let vaakaDir = tmp.appendingPathComponent("Vaaka", isDirectory: true)
         try? fm.createDirectory(at: vaakaDir, withIntermediateDirectories: true)
         return vaakaDir.appendingPathComponent("whitelist.json")
     }
 
-    func loadWhitelistIfNeeded() {
+    private init() {
+        print("[DEBUG] SiteManager.init start")
+        loadSites()
+        print("[DEBUG] SiteManager.init done: loaded \(sites.count) sites")
+    }
+
+    /// Loads sites from bundled resource `whitelist.json` if no persisted file exists, otherwise from persisted file.
+    /// This method strictly expects the new `sites` schema and will silently fail (no fallback) if the schema is invalid.
+    func loadSites() {
+        let decoder = JSONDecoder()
+        // Prefer persisted file in App Support; if missing, load bundled resource and persist it (first-run behavior)
         if FileManager.default.fileExists(atPath: fileURL.path) {
-            loadWhitelist()
+            do {
+                let data = try Data(contentsOf: fileURL)
+                let schema = try decoder.decode(FileSchema.self, from: data)
+                sites = schema.sites
+            } catch {
+                print("[DEBUG] Failed to load persisted whitelist: \(error) — falling back to empty sites")
+                sites = []
+            }
         } else {
-            // Copy bundled default if possible, otherwise create a minimal default
-            if let bundled = Bundle.module.url(forResource: "whitelist", withExtension: "json") {
-                try? FileManager.default.copyItem(at: bundled, to: fileURL)
-                loadWhitelist()
-            } else {
-                simpleDomains = ["example.com", "github.com"]
-                regexPatterns = []
-                saveWhitelist()
+            do {
+                guard let bundled = Bundle.module.url(forResource: "whitelist", withExtension: "json") else { print("[DEBUG] No bundled whitelist.json"); sites = []; return }
+                let data = try Data(contentsOf: bundled)
+                let schema = try decoder.decode(FileSchema.self, from: data)
+                sites = schema.sites
+                // Persist the bundled version for future launches
+                try? data.write(to: fileURL)
+            } catch {
+                print("[DEBUG] Failed to load bundled whitelist: \(error) — falling back to empty sites")
+                sites = []
             }
         }
     }
 
-    func loadWhitelist() {
-        guard let data = try? Data(contentsOf: fileURL) else { return }
-        struct W: Codable {
-            let version: String
-            let simple_domains: [String]
-            let regex_patterns: [String]
-            let builtin_oauth: [String]
-        }
-        if let w = try? JSONDecoder().decode(W.self, from: data) {
-            simpleDomains = w.simple_domains
-            regexPatterns = w.regex_patterns
-        }
+    /// Normalize a host for domain-based matching (strip leading 'www.' and lowercase).
+    static func canonicalHost(_ host: String?) -> String? {
+        guard var h = host?.lowercased() else { return nil }
+        if h.hasPrefix("www.") { h = String(h.dropFirst(4)) }
+        return h
     }
 
-    func saveWhitelist() {
-        let obj: [String: Any] = [
-            "version": "1.0",
-            "simple_domains": simpleDomains,
-            "regex_patterns": regexPatterns,
-            "builtin_oauth": builtinOAuth
-        ]
-        if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) {
-            try? data.write(to: fileURL)
-        }
+    /// Returns true if `host` belongs to `siteHost` domain (ex: sub.example.com matches example.com).
+    static func hostMatches(host: String?, siteHost: String?) -> Bool {
+        guard let h = canonicalHost(host), let s = canonicalHost(siteHost) else { return false }
+        if h == s { return true }
+        if h.hasSuffix("." + s) { return true }
+        return false
     }
 
-    func addDomain(_ domain: String) {
-        guard !simpleDomains.contains(domain) else { return }
-        simpleDomains.append(domain)
-        saveWhitelist()
-        NotificationCenter.default.post(name: Notification.Name("Vaaka.WhitelistChanged"), object: self)
-    }
-
-    func removeDomain(_ domain: String) {
-        simpleDomains.removeAll { $0 == domain }
-        saveWhitelist()
-        NotificationCenter.default.post(name: Notification.Name("Vaaka.WhitelistChanged"), object: self)
-    }
-
+    /// Check if given URL is allowed by any configured site (domain-based, subdomains allowed).
     func isWhitelisted(url: URL) -> Bool {
         guard let host = url.host else { return false }
-        if builtinOAuth.contains(host) { return true }
-        for domain in simpleDomains {
-            if host == domain || host.hasSuffix("." + domain) { return true }
-        }
-        let urlString = url.absoluteString
-        for pattern in regexPatterns {
-            if let regex = try? NSRegularExpression(pattern: pattern),
-               regex.firstMatch(in: urlString, range: NSRange(urlString.startIndex..., in: urlString)) != nil {
-                return true
-            }
+        for site in sites {
+            if SiteManager.hostMatches(host: host, siteHost: site.url.host) { return true }
         }
         return false
+    }
+
+    /// Returns the Site that owns the given URL, or nil. Matching is domain-based.
+    func site(for url: URL) -> Site? {
+        guard let host = url.host else { return nil }
+        return sites.first { site in
+            return SiteManager.hostMatches(host: host, siteHost: site.url.host)
+        }
+    }
+
+    // MARK: - Validation helpers for user input
+
+    /// Normalize a user-provided domain or URL (e.g. "example.com" or "https://example.com") into a `URL` if valid. Returns nil if invalid.
+    static func normalizedURL(from input: String) -> URL? {
+        let s = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        // Try raw parse first
+        if let u = URL(string: s), let host = u.host, !host.isEmpty {
+            // ensure host contains a dot (simple heuristic) to avoid accidental local strings
+            if host.contains(".") { return u }
+        }
+        // If no scheme present, try https://<input>
+        if let pref = URL(string: "https://\(s)"), let host = pref.host, host.contains(".") {
+            return pref
+        }
+        return nil
+    }
+
+    /// Lightweight validation for domain-like strings acceptable to the user (matches the behavior of normalizedURL).
+    static func isValidDomainInput(_ input: String) -> Bool {
+        return normalizedURL(from: input) != nil
+    }
+
+    /// Replace the sites array with a new ordered array and persist. (Used by Settings only.)
+    func replaceSites(_ newSites: [Site]) {
+        print("[DEBUG] SiteManager.replaceSites: replacing \(newSites.count) sites")
+        let encoder = JSONEncoder()
+        let schema = FileSchema(version: "1.0", sites: newSites)
+        if let data = try? encoder.encode(schema) {
+            try? data.write(to: fileURL)
+            sites = newSites
+            // After persisting, attempt to fetch missing favicons asynchronously
+            fetchMissingFaviconsIfNeeded(for: newSites)
+        }
+    }
+
+    private var fetchingSiteIDs: Set<String> = []
+
+    private func fetchMissingFaviconsIfNeeded(for newSites: [Site]) {
+        for site in newSites where site.favicon == nil {
+            guard !fetchingSiteIDs.contains(site.id) else { continue }
+            fetchingSiteIDs.insert(site.id)
+            print("[DEBUG] Fetching favicon for site id=\(site.id) host=\(site.url.host ?? "<no-host>")")
+            FaviconFetcher.shared.fetchFavicon(for: site.url) { img in
+                defer { self.fetchingSiteIDs.remove(site.id) }
+                guard let img = img else {
+                    print("[DEBUG] No favicon found for site id=\(site.id)")
+                    return
+                }
+                if let filename = FaviconFetcher.shared.saveImage(img, forSiteID: site.id) {
+                    print("[DEBUG] Saved favicon for site id=\(site.id) filename=\(filename)")
+                    DispatchQueue.main.async {
+                        var s = self.sites
+                        if let idx = s.firstIndex(where: { $0.id == site.id }) {
+                            // Only update if changed
+                            if s[idx].favicon != filename {
+                                s[idx] = Site(id: s[idx].id, name: s[idx].name, url: s[idx].url, favicon: filename)
+                                // Persist the updated list (this will not re-trigger fetch for the same site since favicon is set)
+                                self.replaceSites(s)
+                            }
+                        }
+                    }
+                } else {
+                    print("[DEBUG] Failed to save favicon image for site id=\(site.id)")
+                }
+            }
+        }
     }
 }
