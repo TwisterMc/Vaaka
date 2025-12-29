@@ -16,7 +16,7 @@ if CommandLine.arguments.contains("--test-add-site") || CommandLine.arguments.co
     }
     if let urlStr = urlStr, let url = URL(string: urlStr) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            print("[DEBUG] Test hook: adding a new site (\(url.absoluteString)) to reproduce add-time behavior")
+            DebugLogger.debug("Test hook: adding a new site (\(url.absoluteString)) to reproduce add-time behavior")
             let host = url.host ?? "site"
             let name = host.capitalized
             let newSite = Site(id: UUID().uuidString, name: name, url: url, favicon: nil)
@@ -29,14 +29,14 @@ if CommandLine.arguments.contains("--test-add-site") || CommandLine.arguments.co
                 for i in 0..<8 {
                     let delay = 0.05 * Double(i)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.05 + delay) {
-                        print("[DEBUG] Test hook: churn replaceSites iteration=\(i)")
+                        DebugLogger.debug("Test hook: churn replaceSites iteration=\(i)")
                         SiteManager.shared.replaceSites(SiteManager.shared.sites)
                     }
                 }
             }
         }
     } else {
-        print("[DEBUG] Test hook: no valid URL provided for --test-add-site-url")
+        DebugLogger.debug("Test hook: no valid URL provided for --test-add-site-url")
     }
 }
 

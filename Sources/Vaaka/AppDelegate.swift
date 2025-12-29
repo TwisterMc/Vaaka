@@ -5,7 +5,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var windowController: BrowserWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        print("[DEBUG] AppDelegate.applicationDidFinishLaunching start")
+        DebugLogger.debug("AppDelegate.applicationDidFinishLaunching start")
         // Ensure sites are loaded from settings (bundled or persisted)
         SiteManager.shared.loadSites()
 

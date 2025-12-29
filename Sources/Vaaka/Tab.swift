@@ -39,8 +39,7 @@ final class SiteTab: NSObject {
 
             // If we temporarily unhid the WebView for the initial load, re-hide it now that navigation started.
             if self.temporarilyUnhiddenForLoad {
-                print("[DEBUG] SiteTab: re-hiding webView after navigation started for site.id=\(self.site.id)")
-                self.webView.isHidden = true
+                DebugLogger.debug("SiteTab: re-hiding webView after navigation started for site.id=\(self.site.id)")
                 self.temporarilyUnhiddenForLoad = false
             }
 
@@ -49,11 +48,11 @@ final class SiteTab: NSObject {
             let wi = DispatchWorkItem { [weak self] in
                 guard let self = self else { return }
                 if self.navigationInProgress {
-                    print("[WARN] SiteTab.navigation stuck watchdog fired: site.id=\(self.site.id) url=\(self.site.url.absoluteString) — attempting in-app recovery")
+                    DebugLogger.warn("SiteTab.navigation stuck watchdog fired: site.id=\(self.site.id) url=\(self.site.url.absoluteString) — attempting in-app recovery")
                     DispatchQueue.main.async {
                         // Try to recover by activating the tab (makes WebView visible) and reloading once.
                         if let idx = SiteTabManager.shared.tabs.firstIndex(where: { $0.site.id == self.site.id }) {
-                            print("[DEBUG] SiteTab.navigation stuck: activating tab idx=\(idx) id=\(self.site.id) and reloading")
+                            DebugLogger.debug("SiteTab.navigation stuck: activating tab idx=\(idx) id=\(self.site.id) and reloading")
                             SiteTabManager.shared.setActiveIndex(idx)
                             self.webView.reload()
                             // Telemetry: note we've fired the stuck watchdog and attempted in-app recovery
@@ -63,7 +62,7 @@ final class SiteTab: NSObject {
                             let finalWi = DispatchWorkItem { [weak self] in
                                 guard let self = self else { return }
                                 if self.navigationInProgress {
-                                    print("[WARN] SiteTab.navigation final watchdog fired: site.id=\(self.site.id) — opening externally")
+                                    DebugLogger.warn("SiteTab.navigation final watchdog fired: site.id=\(self.site.id) — opening externally")
                                     // Telemetry: final fallback
                                     Telemetry.shared.recordStuckWatchdog(siteId: self.site.id, phase: "final_fallback")
                                     NSWorkspace.shared.open(self.site.url)
@@ -120,15 +119,15 @@ final class SiteTab: NSObject {
             temporarilyUnhiddenForLoad = true
         }
 
-        print("[DEBUG] SiteTab.loadStartURLIfNeeded: site.id=\(site.id) url=\(site.url.absoluteString) webViewHidden=\(webView.isHidden) — calling webView.load")
+        DebugLogger.debug("SiteTab.loadStartURLIfNeeded: site.id=\(site.id) url=\(site.url.absoluteString) webViewHidden=\(webView.isHidden) — calling webView.load")
         let nav = webView.load(req)
-        print("[DEBUG] SiteTab.loadStartURLIfNeeded: webView.load returned navigation=\(nav != nil ? "non-nil" : "nil")")
+        DebugLogger.debug("SiteTab.loadStartURLIfNeeded: webView.load returned navigation=\(nav != nil ? "non-nil" : "nil")")
 
         // Start a watchdog: if navigation hasn't begun in 10s, fall back and open externally.
         let wi = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             if self.webView.url == nil {
-                print("[WARN] SiteTab.load watchdog fired: site.id=\(self.site.id) url=\(self.site.url.absoluteString) — opening externally")
+                DebugLogger.warn("SiteTab.load watchdog fired: site.id=\(self.site.id) url=\(self.site.url.absoluteString) — opening externally")
                 Telemetry.shared.recordLoadWatchdog(siteId: self.site.id)
                 NSWorkspace.shared.open(self.site.url)
                 // Ensure UI spinner is not left running

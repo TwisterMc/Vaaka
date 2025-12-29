@@ -36,7 +36,7 @@ class MockURLProtocol: URLProtocol {
 
 final class FaviconFetcherTests: XCTestCase {
     func testDiscoverAndFetchIconFromHTML() throws {
-        let baseURL = URL(string: "https://example.com")!
+        let baseURL = URL(string: "https://apple.com")!
         // Prepare an image to return
         let size = NSSize(width: 16, height: 16)
         let img = NSImage(size: size)

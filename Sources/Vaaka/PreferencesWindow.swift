@@ -59,7 +59,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         controls.spacing = 8
 
         // Hint and warning
-        let hintLabel = NSTextField(labelWithString: "Enter domains like example.com")
+        let hintLabel = NSTextField(labelWithString: "Enter domains like apple.com")
         hintLabel.font = NSFont.systemFont(ofSize: 11)
         hintLabel.textColor = NSColor.secondaryLabelColor
 
@@ -166,7 +166,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             let urlStr = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !urlStr.isEmpty else { tf.stringValue = ""; return }
             guard let normalized = SiteManager.normalizedURL(from: urlStr) else {
-                setError("Please enter a valid domain or URL (e.g. example.com or https://example.com)")
+                setError("Please enter a valid domain or URL (e.g. apple.com or https://apple.com)")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { setError(nil); tf.stringValue = "" }
                 return
             }
@@ -215,7 +215,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
                 }
             } else {
                 // invalid
-                setError("Please enter a valid domain or URL (e.g. example.com or https://example.com)")
+                setError("Please enter a valid domain or URL (e.g. apple.com or https://apple.com)")
                 // revert display but keep the error visible briefly
                 tf.stringValue = original.url.host ?? original.url.absoluteString
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { setError(nil) }
@@ -229,19 +229,20 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // If row is the trailing empty row, show placeholder for adding
         if row >= sites.count {
             let tf = NSTextField(string: "")
-            tf.placeholderString = "example.com"
+            // No placeholder per UX request — trailing add-row is blank
+            tf.placeholderString = ""
             tf.isBordered = false
             tf.backgroundColor = .clear
             tf.lineBreakMode = .byTruncatingTail
             tf.isEditable = true
             tf.delegate = self
             tf.textColor = NSColor.labelColor
-            tf.toolTip = "Enter a domain (e.g. example.com) and press Enter to add"
+            tf.toolTip = "Enter a domain and press Enter to add"
             return tf
         }
 
         let site = sites[row]
-        // Single column table: show only the host (example.com) to the user
+        // Single column table: show only the host (e.g. apple.com) to the user
         let hostStr = site.url.host ?? site.url.absoluteString
         let tf = NSTextField(string: hostStr)
         tf.isBordered = false
@@ -250,7 +251,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         tf.isEditable = true
         tf.delegate = self
         tf.textColor = NSColor.labelColor
-        tf.toolTip = "Double-click or edit to change domain (e.g. example.com)"
+        tf.toolTip = "Double-click or edit to change domain (e.g. apple.com)"
         return tf
     }
 }

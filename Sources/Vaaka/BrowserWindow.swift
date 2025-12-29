@@ -150,7 +150,7 @@ class BrowserWindowController: NSWindowController {
     @objc private func sitesChanged() {
         // Diagnostic: log content container subviews before change
         let beforeSubviews = contentContainer.subviews.count
-        print("[DEBUG] sitesChanged: contentContainer.subviews before=\(beforeSubviews) webViewsAttached=\(webViewsAttached)")
+        DebugLogger.debug("sitesChanged: contentContainer.subviews before=\(beforeSubviews) webViewsAttached=\(webViewsAttached)")
 
         rebuildRailButtons()
         attachAllWebViewsIfNeeded()
@@ -162,14 +162,14 @@ class BrowserWindowController: NSWindowController {
             if let wv = v as? WKWebView, let id = wv.identifier?.rawValue {
                 if !currentSiteIds.contains(id) {
                     removed.append(id)
-                    print("[DEBUG] sitesChanged: removing orphaned webView for site.id=\(id)")
+                    DebugLogger.debug("sitesChanged: removing orphaned webView for site.id=\(id)")
                     wv.removeFromSuperview()
                     webViewsAttached.remove(id)
                 }
             }
         }
         let afterSubviews = contentContainer.subviews.count
-        print("[DEBUG] sitesChanged: contentContainer.subviews after=\(afterSubviews) removed=\(removed)")
+        DebugLogger.debug("sitesChanged: contentContainer.subviews after=\(afterSubviews) removed=\(removed)")
 
         // If last active site got removed, SiteTabManager will have set activeIndex appropriately; update UI.
         activeTabChanged()
@@ -202,14 +202,12 @@ class BrowserWindowController: NSWindowController {
             if let fname = tab.site.favicon {
                 let exists = FaviconFetcher.shared.resourceExistsOnDisk(fname)
                 let loaded = FaviconFetcher.shared.image(forResource: fname) != nil
-                print("[DEBUG] rebuildRailButtons: site.id=\(tab.site.id) favicon=\(fname) exists=\(exists) imageLoadable=\(loaded)")
+                DebugLogger.trace("rebuildRailButtons: site.id=\(tab.site.id) favicon=\(fname) exists=\(exists) imageLoadable=\(loaded)")
             } else {
-                print("[DEBUG] rebuildRailButtons: site.id=\(tab.site.id) favicon=nil")
+                DebugLogger.trace("rebuildRailButtons: site.id=\(tab.site.id) favicon=nil")
             }
-            print("[DEBUG] rebuildRailButtons: created RailItemView for site.id=\(tab.site.id) debug=\(item.debugInfo())")
-
+            DebugLogger.debug("rebuildRailButtons: created RailItemView for site.id=\(tab.site.id) debug=\(item.debugInfo())")
         }
-        updateEmptyStateIfNeeded()
     }
 
     private func updateRailSelection(activeIndex: Int) {
@@ -223,7 +221,7 @@ class BrowserWindowController: NSWindowController {
         for tab in tabs {
             if webViewsAttached.contains(tab.site.id) { continue }
             // Diagnostic: log the state before attaching
-            print("[DEBUG] attachAllWebViewsIfNeeded: attaching site.id=\(tab.site.id) webView.url=\(tab.webView.url?.absoluteString ?? "<no-url>") webView.isHidden=\(tab.webView.isHidden) frame=\(tab.webView.frame)")
+DebugLogger.trace("attachAllWebViewsIfNeeded: attaching site.id=\(tab.site.id) webView.url=\(tab.webView.url?.absoluteString ?? "<no-url>") webView.isHidden=\(tab.webView.isHidden) frame=\(tab.webView.frame)")
 
             // Attach once
             let webView = tab.webView
@@ -240,11 +238,11 @@ class BrowserWindowController: NSWindowController {
             webViewsAttached.insert(tab.site.id)
 
             // Diagnostic: confirm attached and state
-            print("[DEBUG] attachAllWebViewsIfNeeded: attached site.id=\(tab.site.id) webView.superview=\(webView.superview != nil) frame=\(webView.frame) isHidden=\(webView.isHidden)")
+            DebugLogger.trace("attachAllWebViewsIfNeeded: attached site.id=\(tab.site.id) webView.superview=\(webView.superview != nil) frame=\(webView.frame) isHidden=\(webView.isHidden)")
 
             // Start navigation only after the webview is attached to the view hierarchy
             tab.loadStartURLIfNeeded()
-            print("[DEBUG] attachAllWebViewsIfNeeded: called loadStartURLIfNeeded for site.id=\(tab.site.id)")
+            DebugLogger.trace("attachAllWebViewsIfNeeded: called loadStartURLIfNeeded for site.id=\(tab.site.id)")
         }
     }
 
@@ -253,7 +251,7 @@ class BrowserWindowController: NSWindowController {
         for (i, tab) in tabs.enumerated() {
             let willHide = (i != index)
             if tab.webView.isHidden != willHide {
-                print("[DEBUG] setActiveWebViewVisibility: site.id=\(tab.site.id) oldHidden=\(tab.webView.isHidden) newHidden=\(willHide) index=\(i) activeIndex=\(index) webView.url=\(tab.webView.url?.absoluteString ?? "<no-url>")")
+                DebugLogger.trace("setActiveWebViewVisibility: site.id=\(tab.site.id) oldHidden=\(tab.webView.isHidden) newHidden=\(willHide) index=\(i) activeIndex=\(index) webView.url=\(tab.webView.url?.absoluteString ?? "<no-url>")")
             }
             tab.webView.isHidden = willHide
         }
@@ -308,12 +306,12 @@ class BrowserWindowController: NSWindowController {
 
         // Find which tab this is
         if let idx = SiteTabManager.shared.tabs.firstIndex(where: { $0.site.id == siteId }) {
-            let site = SiteTabManager.shared.tabs[idx].site
             // Instead of a blocking modal, show an in-tab error page with Retry / Open in Browser / Dismiss
             DispatchQueue.main.async {
                 SiteTabManager.shared.setActiveIndex(idx)
                 let tab = SiteTabManager.shared.tabs[idx]
                 tab.webView.isHidden = false
+                let site = tab.site
                 // Determine a full URL to open and a short hostname to display.
                 let fullURLString: String
                 let displayHost: String
@@ -431,12 +429,23 @@ class BrowserWindowController: NSWindowController {
             messageLabel.alignment = .center
             messageLabel.font = NSFont.systemFont(ofSize: 14)
             messageLabel.translatesAutoresizingMaskIntoConstraints = false
+            // Accessibility
+            messageLabel.setAccessibilityLabel(messageLabel.stringValue)
+            messageLabel.setAccessibilityIdentifier("EmptyState.Message")
+
             button.bezelStyle = .rounded
             button.target = self
             button.action = #selector(openPressed)
             button.translatesAutoresizingMaskIntoConstraints = false
+            button.setAccessibilityLabel("Open Settings")
+            button.setAccessibilityIdentifier("EmptyState.OpenSettings")
+            button.setAccessibilityRole(.button)
+
             addSubview(messageLabel)
             addSubview(button)
+            // Make this view an accessibility group and expose children
+            self.setAccessibilityElement(false)
+
             NSLayoutConstraint.activate([
                 messageLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
                 messageLabel.topAnchor.constraint(equalTo: topAnchor),
@@ -483,27 +492,27 @@ class BrowserWindowController: NSWindowController {
             let beforeSize = imageView.image?.size.debugDescription ?? "nil"
             imageView.image = img
             let afterHas = (img != nil)
-            print("[DEBUG] RailItemView.applyImage: site.id=\(site.id) reason=\(reason) beforeHas=\(beforeHas) beforeSize=\(beforeSize) afterHas=\(afterHas) afterSize=\(img?.size.debugDescription ?? "nil")")
+            DebugLogger.debug("RailItemView.applyImage: site.id=\(site.id) reason=\(reason) beforeHas=\(beforeHas) beforeSize=\(beforeSize) afterHas=\(afterHas) afterSize=\(img?.size.debugDescription ?? "nil")")
             if beforeHas && !afterHas {
-                print("[WARN] RailItemView.applyImage: site.id=\(site.id) image unexpectedly removed by reason=\(reason)")
+                DebugLogger.warn("RailItemView.applyImage: site.id=\(site.id) image unexpectedly removed by reason=\(reason)")
             }
             if lastKnownHasImage != afterHas {
-                print("[TRACE] RailItemView.hasImageTransition: site.id=\(site.id) from=\(lastKnownHasImage) to=\(afterHas) reason=\(reason)")
+                DebugLogger.debug("RailItemView.hasImageTransition: site.id=\(site.id) from=\(lastKnownHasImage) to=\(afterHas) reason=\(reason)")
             }
             lastKnownHasImage = afterHas
         }
         private func setImageHidden(_ hidden: Bool, reason: String) {
             let had = imageView.image != nil
             imageView.isHidden = hidden
-            print("[DEBUG] RailItemView.setImageHidden: site.id=\(site.id) hidden=\(hidden) reason=\(reason) debug=\(debugInfo())")
+            DebugLogger.debug("RailItemView.setImageHidden: site.id=\(site.id) hidden=\(hidden) reason=\(reason) debug=\(debugInfo())")
             // If we have no image but are hidden==false, that's suspicious (we show nothing)
             if !hidden && !had && imageView.image == nil {
-                print("[WARN] RailItemView.setImageHidden: site.id=\(site.id) making visible but no image present (possible blank rail)")
+                DebugLogger.warn("RailItemView.setImageHidden: site.id=\(site.id) making visible but no image present (possible blank rail)")
             }
         }
         private func setImageAlpha(_ alpha: CGFloat, reason: String) {
             imageView.alphaValue = alpha
-            print("[DEBUG] RailItemView.setImageAlpha: site.id=\(site.id) alpha=\(alpha) reason=\(reason) debug=\(debugInfo())")
+            DebugLogger.debug("RailItemView.setImageAlpha: site.id=\(site.id) alpha=\(alpha) reason=\(reason) debug=\(debugInfo())")
         }
 
         private func setup() {
@@ -518,8 +527,15 @@ class BrowserWindowController: NSWindowController {
 
             imageView.translatesAutoresizingMaskIntoConstraints = false
             imageView.imageScaling = .scaleProportionallyUpOrDown
+            imageView.setAccessibilityHidden(true)
 
             spinner.style = .spinning
+
+            // Accessibility for tab item
+            self.setAccessibilityElement(true)
+            self.setAccessibilityRole(.button)
+            self.setAccessibilityLabel("\(site.name) tab")
+            self.setAccessibilityIdentifier("RailItem.\(site.id)")
             spinner.controlSize = .small
             spinner.translatesAutoresizingMaskIntoConstraints = false
             spinner.isDisplayedWhenStopped = false
@@ -560,7 +576,7 @@ class BrowserWindowController: NSWindowController {
                 let beforeHas = (imageView.image != nil)
                 let beforeSize = imageView.image?.size.debugDescription ?? "nil"
                 imageView.image = img
-                print("[DEBUG] RailItemView.applyImage: site.id=\(site.id) reason=\(reason) beforeHas=\(beforeHas) beforeSize=\(beforeSize) afterHas=\(img != nil) afterSize=\(img?.size.debugDescription ?? "nil")")
+                DebugLogger.debug("RailItemView.applyImage: site.id=\(site.id) reason=\(reason) beforeHas=\(beforeHas) beforeSize=\(beforeSize) afterHas=\(img != nil) afterSize=\(img?.size.debugDescription ?? "nil")")
             }
             func setImageHidden(_ hidden: Bool, reason: String) {
                 imageView.isHidden = hidden
@@ -636,7 +652,7 @@ class BrowserWindowController: NSWindowController {
                     spinner.animator().alphaValue = 1.0
                 }, completionHandler: {
                     self.setImageHidden(true, reason: "setLoading:start:anim-complete")
-                    print("[DEBUG] RailItemView.setLoading(start) completed: site.id=\(self.site.id) image=nil?=\(self.imageView.image == nil)")
+                    DebugLogger.debug("RailItemView.setLoading(start) completed: site.id=\(self.site.id) image=nil?=\(self.imageView.image == nil)")
                 })
 
                 // Schedule a fallback in case loading stalls: show a mono icon and stop spinner after a short timeout
@@ -650,7 +666,7 @@ class BrowserWindowController: NSWindowController {
                             self.setImageAlpha(1.0, reason: "loadingTimeout:set-alpha-1")
                             self.spinner.stopAnimation(nil)
                             self.spinner.isHidden = true
-                            print("[DEBUG] RailItemView.loadingTimeout: applied fallback mono icon for site.id=\(self.site.id) host=\(host)")
+                            DebugLogger.debug("RailItemView.loadingTimeout: applied fallback mono icon for site.id=\(self.site.id) host=\(host)")
                         }
                     }
                 }
@@ -677,7 +693,7 @@ class BrowserWindowController: NSWindowController {
                 }, completionHandler: {
                     self.spinner.stopAnimation(nil)
                     self.spinner.isHidden = true
-                    print("[DEBUG] RailItemView.setLoading(finish) completed: site.id=\(self.site.id) image=nil?=\(self.imageView.image == nil) size=\(self.imageView.image?.size.debugDescription ?? "nil")")
+                    DebugLogger.debug("RailItemView.setLoading(finish) completed: site.id=\(self.site.id) image=nil?=\(self.imageView.image == nil) size=\(self.imageView.image?.size.debugDescription ?? "nil")")
 
                     // Ensure any pending loading-timeout fallback is cancelled now that finish completed
                     self.loadingTimeoutWorkItem?.cancel()
@@ -689,7 +705,7 @@ class BrowserWindowController: NSWindowController {
                             self.applyImage(FaviconFetcher.shared.generateMonoIcon(for: host), reason: "setLoading:immediate-fallback-mono-for:\(host)")
                             self.setImageHidden(false, reason: "setLoading:immediate-fallback-ensure-visible")
                             self.setImageAlpha(1.0, reason: "setLoading:immediate-fallback-alpha-1")
-                            print("[DEBUG] RailItemView.setLoading: immediate fallback mono icon applied for site.id=\(self.site.id) host=\(host)")
+                            DebugLogger.debug("RailItemView.setLoading: immediate fallback mono icon applied for site.id=\(self.site.id) host=\(host)")
                         }
                     }
 
@@ -701,7 +717,7 @@ class BrowserWindowController: NSWindowController {
                     if self.imageView.image == nil, self.reloadRetries < 3 {
                         self.reloadRetries += 1
                         let attempt = self.reloadRetries
-                        print("[DEBUG] RailItemView.setLoading: scheduling retry \(attempt) for site.id=\(self.site.id)")
+                        DebugLogger.debug("RailItemView.setLoading: scheduling retry \(attempt) for site.id=\(self.site.id)")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                             if let name = self.site.favicon, let img = FaviconFetcher.shared.image(forResource: name) {
                                 self.applyImage(img, reason: "retry:loaded-resource:\(name):attempt:\(attempt)")
@@ -723,6 +739,12 @@ class BrowserWindowController: NSWindowController {
         @objc private func clicked(_ g: NSClickGestureRecognizer) {
             // Treat clicks as activation; right-click is handled via rightMouseDown
             actionTarget?.railItemClicked(index)
+        }
+
+        // Support VoiceOver / accessibility press for the tab
+        override func accessibilityPerformPress() -> Bool {
+            actionTarget?.railItemClicked(index)
+            return true
         }
 
         override func rightMouseDown(with event: NSEvent) {

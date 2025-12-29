@@ -36,10 +36,10 @@ final class SiteTabManager: NSObject {
 
     private override init() {
         super.init()
-        print("[DEBUG] SiteTabManager.init start")
+        DebugLogger.debug("SiteTabManager.init start")
         // Build tabs from current sites
         rebuildTabs()
-        print("[DEBUG] SiteTabManager.init after rebuild: tabs=\(tabs.count)")
+        DebugLogger.debug("SiteTabManager.init after rebuild: tabs=\(tabs.count)")
         NotificationCenter.default.addObserver(self, selector: #selector(sitesChanged), name: .SitesChanged, object: nil)
         restoreLastActiveSite()
         // Initialization complete — flip flag and notify observers once (defer notifications to next run loop to avoid re-entrancy during static init)
@@ -48,7 +48,7 @@ final class SiteTabManager: NSObject {
             NotificationCenter.default.post(name: .TabsChanged, object: self)
             NotificationCenter.default.post(name: .ActiveTabChanged, object: self)
         }
-        print("[DEBUG] SiteTabManager.init done: activeIndex=\(activeIndex)")
+        DebugLogger.debug("SiteTabManager.init done: activeIndex=\(activeIndex)")
     }
 
     @objc private func sitesChanged() {
@@ -60,11 +60,11 @@ final class SiteTabManager: NSObject {
         let sites = SiteManager.shared.sites
         // Diagnostic: log currently existing tabs and their URLs to help track unexpected blanking
         let existingInfo = tabs.map { "\($0.site.id):\($0.webView.url?.absoluteString ?? "<no-url>")" }
-        print("[DEBUG] rebuildTabs: existing tabs count=\(tabs.count) info=\(existingInfo)")
+        DebugLogger.debug("rebuildTabs: existing tabs count=\(tabs.count) info=\(existingInfo)")
 
         // Create tabs in same order; reuse existing SiteTab instances where the site id is unchanged
         var newTabs: [SiteTab] = []
-        print("[DEBUG] rebuildTabs: sites.count=\(sites.count)")
+        DebugLogger.debug("rebuildTabs: sites.count=\(sites.count)")
 
         // Map existing tabs by site id for reuse
         var existingById: [String: SiteTab] = [:]
@@ -72,14 +72,14 @@ final class SiteTabManager: NSObject {
 
         for site in sites {
             if let existing = existingById[site.id] {
-                print("[DEBUG] rebuildTabs: reusing tab for site id=\(site.id) name=\(site.name)")
+                DebugLogger.debug("rebuildTabs: reusing tab for site id=\(site.id) name=\(site.name)")
                 newTabs.append(existing)
                 // Remove from existingById map — remaining entries will be considered removed
                 existingById.removeValue(forKey: site.id)
                 continue
             }
 
-            print("[DEBUG] rebuildTabs: creating tab for site id=\(site.id) name=\(site.name)")
+            DebugLogger.debug("rebuildTabs: creating tab for site id=\(site.id) name=\(site.name)")
             let config = WKWebViewConfiguration()
             let webpagePreferences = WKWebpagePreferences()
             webpagePreferences.allowsContentJavaScript = true
@@ -129,11 +129,11 @@ final class SiteTabManager: NSObject {
         }
         // Any site ids still present in `existingById` are removed — their webviews should be cleaned by BrowserWindow
         if !existingById.isEmpty {
-            print("[DEBUG] rebuildTabs: removed site ids=\(Array(existingById.keys))")
+            DebugLogger.debug("rebuildTabs: removed site ids=\(Array(existingById.keys))")
         }
         tabs = newTabs
         let newInfo = tabs.map { "\($0.site.id):\($0.webView.url?.absoluteString ?? "<no-url>")" }
-        print("[DEBUG] rebuildTabs: new tabs count=\(tabs.count) info=\(newInfo)")
+        DebugLogger.debug("rebuildTabs: new tabs count=\(tabs.count) info=\(newInfo)")
         // Adjust active index to valid range
         if tabs.isEmpty {
             activeIndex = 0
@@ -197,19 +197,19 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
             let abs = url.absoluteString
             if let sch = url.scheme?.lowercased(), sch == "data" || sch == "blob" || sch == "about" || abs.hasPrefix("about:") {
                 // treat as internal — allow quietly
-                print("[DEBUG] Ignoring internal navigation attempt to \(url)")
+                DebugLogger.debug("Ignoring internal navigation attempt to \(url)")
                 return decisionHandler(.allow)
             }
 
             // If the link looks like an SSO/IdP target, open externally by default to avoid embedded-browser failures.
             if SSODetector.isSSO(url) {
-                print("[DEBUG] Detected SSO/IdP target -> opening externally: \(url)")
+                DebugLogger.debug("Detected SSO/IdP target -> opening externally: \(url)")
                 Telemetry.shared.recordExternalOpen(siteId: site.id, url: url)
                 NSWorkspace.shared.open(url)
                 return decisionHandler(.cancel)
             }
 
-            print("[DEBUG] User clicked external link -> opening in default browser: \(url)")
+            DebugLogger.debug("User clicked external link -> opening in default browser: \(url)")
             Telemetry.shared.recordExternalOpen(siteId: site.id, url: url)
             NSWorkspace.shared.open(url)
             return decisionHandler(.cancel)
@@ -221,14 +221,15 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
 
     // Notify BrowserWindow about start/finish to allow UI updates (loading indicators)
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        print("[DEBUG] navigation: didStartProvisionalNavigation for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") hidden=\(webView.isHidden) navigationNonNil=\(navigation != nil)")
+        DebugLogger.debug("navigation: didStartProvisionalNavigation for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") hidden=\(webView.isHidden) navigationNonNil=\(navigation != nil)")
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: site.id)
         // Telemetry: record navigation start
         Telemetry.shared.recordNavigationStart(siteId: site.id, url: webView.url)
+
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        print("[DEBUG] navigation: didFinish for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") hidden=\(webView.isHidden)")
+        DebugLogger.debug("navigation: didFinish for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") hidden=\(webView.isHidden)")
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
         // Telemetry: record navigation finish
         Telemetry.shared.recordNavigationFinish(siteId: site.id, url: webView.url)
@@ -236,9 +237,9 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         // verify servers and scripts will see the desired Safari-like UA.
         webView.evaluateJavaScript("navigator.userAgent") { result, error in
             if let ua = result as? String {
-                print("[DEBUG] navigator.userAgent: site.id=\(self.site.id) ua=\(ua)")
+                DebugLogger.debug("navigator.userAgent: site.id=\(self.site.id) ua=\(ua)")
             } else if let err = error {
-                print("[DEBUG] navigator.userAgent: site.id=\(self.site.id) error=\(err)")
+                DebugLogger.debug("navigator.userAgent: site.id=\(self.site.id) error=\(err)")
             }
         }
     }
@@ -342,10 +343,10 @@ private final class SelfUIDelegate: NSObject, WKUIDelegate {
         // Open external URLs in default browser and do not create new WebViews
         let abs = url.absoluteString
         if let sch = url.scheme?.lowercased(), sch == "data" || sch == "blob" || sch == "about" || abs.hasPrefix("about:") {
-            print("[DEBUG] Ignoring internal createWebView request for \(url)")
+            DebugLogger.debug("Ignoring internal createWebView request for \(url)")
             return nil
         }
-        print("[DEBUG] Opening external URL from UI delegate: \(url)")
+        DebugLogger.debug("Opening external URL from UI delegate: \(url)")
         NSWorkspace.shared.open(url)
         return nil
     }

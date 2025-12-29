@@ -50,9 +50,9 @@ final class SiteManager {
     }
 
     private init() {
-        print("[DEBUG] SiteManager.init start")
+        DebugLogger.debug("SiteManager.init start")
         loadSites()
-        print("[DEBUG] SiteManager.init done: loaded \(sites.count) sites")
+        DebugLogger.debug("SiteManager.init done: loaded \(sites.count) sites")
     }
 
     /// Loads sites from bundled resource `whitelist.json` if no persisted file exists, otherwise from persisted file.
@@ -66,20 +66,33 @@ final class SiteManager {
                 let schema = try decoder.decode(FileSchema.self, from: data)
                 sites = schema.sites
             } catch {
-                print("[DEBUG] Failed to load persisted whitelist: \(error) — falling back to empty sites")
+                DebugLogger.warn("Failed to load persisted whitelist: \(error) — falling back to empty sites")
                 sites = []
             }
         } else {
             do {
-                guard let bundled = Bundle.module.url(forResource: "whitelist", withExtension: "json") else { print("[DEBUG] No bundled whitelist.json"); sites = []; return }
+                guard let bundled = Bundle.module.url(forResource: "whitelist", withExtension: "json") else { DebugLogger.warn("No bundled whitelist.json"); sites = []; return }
                 let data = try Data(contentsOf: bundled)
                 let schema = try decoder.decode(FileSchema.self, from: data)
                 sites = schema.sites
                 // Persist the bundled version for future launches
                 try? data.write(to: fileURL)
             } catch {
-                print("[DEBUG] Failed to load bundled whitelist: \(error) — falling back to empty sites")
+                DebugLogger.warn("Failed to load bundled whitelist: \(error) — falling back to empty sites")
                 sites = []
+            }
+        }
+
+        // If after loading there are no sites configured, seed a sensible default so users have an immediate starter site.
+        if sites.isEmpty {
+            DebugLogger.info("No sites configured; seeding default site: apple.com")
+            if let appleURL = URL(string: "https://apple.com") {
+                let s = Site(id: "apple-default", name: "Apple", url: appleURL, favicon: nil)
+                sites = [s]
+                // Persist the seeded list so users can modify it later
+                let encoder = JSONEncoder()
+                let schema = FileSchema(version: "1.0", sites: sites)
+                if let data = try? encoder.encode(schema) { try? data.write(to: fileURL) }
             }
         }
     }
@@ -141,7 +154,7 @@ final class SiteManager {
 
     /// Replace the sites array with a new ordered array and persist. (Used by Settings only.)
     func replaceSites(_ newSites: [Site]) {
-        print("[DEBUG] SiteManager.replaceSites: replacing \(newSites.count) sites")
+        DebugLogger.debug("SiteManager.replaceSites: replacing \(newSites.count) sites")
 
         // Deduplicate sites by canonical host, preserving first occurrence and original order.
         var seenHosts: Set<String> = []
@@ -149,7 +162,7 @@ final class SiteManager {
         for site in newSites {
             if let host = SiteManager.canonicalHost(site.url.host) {
                 if seenHosts.contains(host) {
-                    print("[DEBUG] SiteManager.replaceSites: duplicate site for host=\(host) id=\(site.id) ignored")
+                    DebugLogger.debug("SiteManager.replaceSites: duplicate site for host=\(host) id=\(site.id) ignored")
                     continue
                 }
                 seenHosts.insert(host)
@@ -165,7 +178,7 @@ final class SiteManager {
         if let data = try? encoder.encode(schema) {
             try? data.write(to: fileURL)
             sites = uniqueSites
-            print("[DEBUG] SiteManager.replaceSites: final sites count=\(sites.count) list=\(sites.map { "\($0.id):\($0.url.host ?? "<no-host>")" })")
+            DebugLogger.debug("SiteManager.replaceSites: final sites count=\(sites.count) list=\(sites.map { "\($0.id):\($0.url.host ?? "<no-host>")" })")
             // After persisting, attempt to fetch missing favicons asynchronously
             fetchMissingFaviconsIfNeeded(for: uniqueSites)
         }
@@ -177,15 +190,15 @@ final class SiteManager {
         for site in newSites where site.favicon == nil {
             guard !fetchingSiteIDs.contains(site.id) else { continue }
             fetchingSiteIDs.insert(site.id)
-            print("[DEBUG] Fetching favicon for site id=\(site.id) host=\(site.url.host ?? "<no-host>")")
+            DebugLogger.debug("Fetching favicon for site id=\(site.id) host=\(site.url.host ?? "<no-host>")")
             FaviconFetcher.shared.fetchFavicon(for: site.url) { img in
                 defer { self.fetchingSiteIDs.remove(site.id) }
                 guard let img = img else {
-                    print("[DEBUG] No favicon found for site id=\(site.id)")
+                    DebugLogger.debug("No favicon found for site id=\(site.id)")
                     return
                 }
                 if let filename = FaviconFetcher.shared.saveImage(img, forSiteID: site.id) {
-                    print("[DEBUG] Saved favicon for site id=\(site.id) filename=\(filename)")
+                    DebugLogger.debug("Saved favicon for site id=\(site.id) filename=\(filename)")
                     DispatchQueue.main.async {
                         var s = self.sites
                         if let idx = s.firstIndex(where: { $0.id == site.id }) {
@@ -198,7 +211,7 @@ final class SiteManager {
                         }
                     }
                 } else {
-                    print("[DEBUG] Failed to save favicon image for site id=\(site.id)")
+                    DebugLogger.warn("Failed to save favicon image for site id=\(site.id)")
                 }
             }
         }

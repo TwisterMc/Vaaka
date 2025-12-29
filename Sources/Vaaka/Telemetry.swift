@@ -100,9 +100,7 @@ final class Telemetry {
     func recordExternalOpen(siteId: String, url: URL?) {
         queue.async { [weak self] in
             guard let self = self else { return }
-            var s = self.stats[siteId] ?? SiteStats()
-            // Keep external opens implicit in totals via an event
-            self.stats[siteId] = s
+            // Record the external open as an event; do not mutate per-site totals here.
             self.appendEvent(Event(timestamp: Date(), siteId: siteId, type: "external_open", info: url?.absoluteString))
         }
     }

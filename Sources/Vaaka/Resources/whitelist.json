@@ -2,9 +2,9 @@
   "version": "1.0",
   "sites": [
     {
-      "id": "example",
-      "name": "Example",
-      "url": "https://example.com",
+      "id": "apple",
+      "name": "Apple",
+      "url": "https://apple.com",
       "favicon": null
     },
     {
