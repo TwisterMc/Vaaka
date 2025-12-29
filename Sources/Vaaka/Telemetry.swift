@@ -97,6 +97,24 @@ final class Telemetry {
         }
     }
 
+    func recordExternalOpen(siteId: String, url: URL?) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            var s = self.stats[siteId] ?? SiteStats()
+            // Keep external opens implicit in totals via an event
+            self.stats[siteId] = s
+            self.appendEvent(Event(timestamp: Date(), siteId: siteId, type: "external_open", info: url?.absoluteString))
+        }
+    }
+
+    /// Record a coarse-grained user action taken from UI surfaces (e.g., Retry/Open/Dismiss on error page).
+    func recordUserAction(siteId: String, action: String) {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            self.appendEvent(Event(timestamp: Date(), siteId: siteId, type: "user_action", info: action))
+        }
+    }
+
     // MARK: - Helpers
     private func appendEvent(_ e: Event) {
         recentEvents.append(e)

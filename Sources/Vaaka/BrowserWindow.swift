@@ -37,6 +37,8 @@ class BrowserWindowController: NSWindowController {
         // Observe loading notifications for showing spinner states
         NotificationCenter.default.addObserver(self, selector: #selector(siteDidStartLoading(_:)), name: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(siteDidFinishLoading(_:)), name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: nil)
+        // Present user-friendly failures when navigation fails
+        NotificationCenter.default.addObserver(self, selector: #selector(siteDidFailLoading(_:)), name: .SiteTabDidFailLoading, object: nil)
 
         // Also react to site list changes
         NotificationCenter.default.addObserver(self, selector: #selector(sitesChanged), name: .SitesChanged, object: nil)
@@ -295,6 +297,44 @@ class BrowserWindowController: NSWindowController {
         guard let id = note.object as? String else { return }
         for case let item as RailItemView in railStackView.arrangedSubviews where item.site.id == id {
             item.setLoading(false)
+        }
+    }
+
+    @objc private func siteDidFailLoading(_ note: Notification) {
+        guard let info = note.userInfo,
+              let siteId = info["siteId"] as? String,
+              let urlStr = info["url"] as? String,
+              let errDesc = info["errorDescription"] as? String else { return }
+
+        // Find which tab this is
+        if let idx = SiteTabManager.shared.tabs.firstIndex(where: { $0.site.id == siteId }) {
+            let site = SiteTabManager.shared.tabs[idx].site
+            // Instead of a blocking modal, show an in-tab error page with Retry / Open in Browser / Dismiss
+            DispatchQueue.main.async {
+                SiteTabManager.shared.setActiveIndex(idx)
+                let tab = SiteTabManager.shared.tabs[idx]
+                tab.webView.isHidden = false
+                // Determine a full URL to open and a short hostname to display.
+                let fullURLString: String
+                let displayHost: String
+                if urlStr.hasPrefix("about:") || urlStr == "<no-url>" || urlStr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    fullURLString = site.url.absoluteString
+                    displayHost = site.url.host ?? site.url.absoluteString
+                } else if let parsed = URL(string: urlStr), let host = parsed.host {
+                    fullURLString = urlStr
+                    displayHost = host
+                } else {
+                    // Fallback: show raw string but prefer site host if available
+                    fullURLString = urlStr
+                    displayHost = site.url.host ?? site.url.absoluteString
+                }
+                tab.showErrorPage(errorDescription: errDesc, failedURL: fullURLString, displayHost: displayHost)
+            }
+        } else {
+            // No tab found for this site — fall back to opening externally so the user can still view the content
+            DispatchQueue.main.async {
+                if let u = URL(string: urlStr) { NSWorkspace.shared.open(u) }
+            }
         }
     }
 

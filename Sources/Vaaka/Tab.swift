@@ -138,4 +138,62 @@ final class SiteTab: NSObject {
         loadingWatchdogWorkItem = wi
         DispatchQueue.main.asyncAfter(deadline: .now() + 10.0, execute: wi)
     }
+
+    /// Display an internal error page for the current site with Retry / Open in Browser / Dismiss buttons.
+    func showErrorPage(errorDescription: String, failedURL: String, displayHost: String? = nil) {
+        func escape(_ s: String) -> String {
+            var r = s.replacingOccurrences(of: "&", with: "&amp;")
+            r = r.replacingOccurrences(of: "<", with: "&lt;")
+            r = r.replacingOccurrences(of: ">", with: "&gt;")
+            r = r.replacingOccurrences(of: "\"", with: "&quot;")
+            return r
+        }
+
+        let title = escape(site.name)
+        let linkHref = escape(failedURL)
+        let displayText = escape(displayHost ?? (URL(string: failedURL)?.host ?? failedURL))
+        let desc = escape(errorDescription)
+        let html = """
+        <!doctype html>
+        <html>
+        <head>
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <style>
+            body { font-family: -apple-system, Helvetica, Arial; margin: 40px; color: #333; background: #fff; }
+            .container { max-width: 820px; margin: auto; text-align: left; }
+            h1 { font-size: 20px; margin-bottom: 8px; }
+            p { color: #666; margin-top: 0; }
+            .desc { margin-top: 12px; color: #a00; }
+            .actions { margin-top: 20px; }
+            button { margin-right: 8px; padding: 8px 12px; font-size: 13px; border-radius: 6px; border: 1px solid #cfcfcf; background: #f7f7f7; }
+            button.primary { background: #007aff; color: white; border: none; }
+            a { color: #007aff; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>Failed to load \(title)</h1>
+            <p>Could not load <a href="\(linkHref)" target="_blank">\(displayText)</a></p>
+            <p class="desc">\(desc)</p>
+            <div class="actions">
+              <button class="primary" onclick='window.webkit.messageHandlers.vaakaError.postMessage({action: "retry"})'>Retry</button>
+              <button onclick='window.webkit.messageHandlers.vaakaError.postMessage({action: "open"})'>Open in Browser</button>
+              <button onclick='window.webkit.messageHandlers.vaakaError.postMessage({action: "dismiss"})'>Dismiss</button>
+            </div>
+          </div>
+        </body>
+        </html>
+        """
+
+        DispatchQueue.main.async {
+            print("[INFO] SiteTab.showErrorPage: site.id=\(self.site.id) showing internal error page for url=\(failedURL) display=\(displayHost ?? "<none>")")
+            // Ensure the tab is visible
+            if let idx = SiteTabManager.shared.tabs.firstIndex(where: { $0.site.id == self.site.id }) {
+                SiteTabManager.shared.setActiveIndex(idx)
+                self.webView.isHidden = false
+            }
+            self.webView.loadHTMLString(html, baseURL: nil)
+        }
+    }
 }
+

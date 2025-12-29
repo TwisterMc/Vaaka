@@ -5,6 +5,8 @@ import WebKit
 extension Notification.Name {
     static let TabsChanged = Notification.Name("Vaaka.TabsChanged")
     static let ActiveTabChanged = Notification.Name("Vaaka.ActiveTabChanged")
+    // Emitted when a navigation fails with error. userInfo may contain: "siteId" (String), "url" (String), "errorDomain" (String), "errorCode" (Int), "errorDescription" (String)
+    static let SiteTabDidFailLoading = Notification.Name("Vaaka.SiteTabDidFailLoading")
 }
 
 /// Manages the 1:1 Site -> SiteTab relationship and ensures all SiteTabs exist at launch
@@ -106,6 +108,8 @@ final class SiteTabManager: NSObject {
             let script = WKUserScript(source: consoleScript, injectionTime: .atDocumentStart, forMainFrameOnly: false)
             userContent.addUserScript(script)
             userContent.add(ConsoleMessageHandler(siteId: site.id), name: "vaakaConsole")
+            // Error page handler receives actions from our internal error page (retry/open/dismiss)
+            userContent.add(ErrorMessageHandler(siteId: site.id), name: "vaakaError")
             config.userContentController = userContent
 
             // Each WebView gets its own configuration
@@ -188,7 +192,7 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
             return decisionHandler(.allow)
         }
 
-        // If this navigation is the result of a user clicking a link, open externally and cancel in-app.
+        // If this navigation is the result of a user clicking a link, determine policy (external for SSO IdPs or external links)
         if navigationAction.navigationType == .linkActivated {
             let abs = url.absoluteString
             if let sch = url.scheme?.lowercased(), sch == "data" || sch == "blob" || sch == "about" || abs.hasPrefix("about:") {
@@ -196,7 +200,17 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
                 print("[DEBUG] Ignoring internal navigation attempt to \(url)")
                 return decisionHandler(.allow)
             }
+
+            // If the link looks like an SSO/IdP target, open externally by default to avoid embedded-browser failures.
+            if SSODetector.isSSO(url) {
+                print("[DEBUG] Detected SSO/IdP target -> opening externally: \(url)")
+                Telemetry.shared.recordExternalOpen(siteId: site.id, url: url)
+                NSWorkspace.shared.open(url)
+                return decisionHandler(.cancel)
+            }
+
             print("[DEBUG] User clicked external link -> opening in default browser: \(url)")
+            Telemetry.shared.recordExternalOpen(siteId: site.id, url: url)
             NSWorkspace.shared.open(url)
             return decisionHandler(.cancel)
         }
@@ -235,6 +249,8 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
         // Telemetry: record failure
         Telemetry.shared.recordNavigationFailure(siteId: site.id, url: webView.url, domain: nsErr.domain, code: nsErr.code, description: nsErr.localizedDescription)
+        // Notify UI so we can present a user-friendly message with Retry / Open externally options
+        NotificationCenter.default.post(name: .SiteTabDidFailLoading, object: nil, userInfo: ["siteId": site.id, "url": webView.url?.absoluteString ?? "<no-url>", "errorDomain": nsErr.domain, "errorCode": nsErr.code, "errorDescription": nsErr.localizedDescription])
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -243,6 +259,8 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
         // Telemetry: record failure
         Telemetry.shared.recordNavigationFailure(siteId: site.id, url: webView.url, domain: nsErr.domain, code: nsErr.code, description: nsErr.localizedDescription)
+        // Notify UI so we can present a user-friendly message with Retry / Open externally options
+        NotificationCenter.default.post(name: .SiteTabDidFailLoading, object: nil, userInfo: ["siteId": site.id, "url": webView.url?.absoluteString ?? "<no-url>", "errorDomain": nsErr.domain, "errorCode": nsErr.code, "errorDescription": nsErr.localizedDescription])
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
@@ -267,6 +285,39 @@ private final class ConsoleMessageHandler: NSObject, WKScriptMessageHandler {
         }
     }
 }
+
+// Handle actions coming from our internal error page (Retry / Open in Browser / Dismiss)
+private final class ErrorMessageHandler: NSObject, WKScriptMessageHandler {
+    private let siteId: String
+    init(siteId: String) { self.siteId = siteId }
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "vaakaError" else { return }
+        if let body = message.body as? [String: Any], let action = body["action"] as? String {
+            DispatchQueue.main.async {
+                guard let tab = SiteTabManager.shared.tabs.first(where: { $0.site.id == self.siteId }) else { return }
+                switch action {
+                case "retry":
+                    print("[INFO] ErrorMessageHandler: retry requested for site.id=\(self.siteId)")
+                    // Attempt to reload the start URL for this site
+                    tab.webView.load(URLRequest(url: tab.site.url))
+                    Telemetry.shared.recordUserAction(siteId: tab.site.id, action: "retry_from_error_page")
+                case "open":
+                    print("[INFO] ErrorMessageHandler: open in browser requested for site.id=\(self.siteId)")
+                    NSWorkspace.shared.open(tab.site.url)
+                    Telemetry.shared.recordUserAction(siteId: tab.site.id, action: "open_in_browser_from_error_page")
+                case "dismiss":
+                    print("[INFO] ErrorMessageHandler: dismiss requested for site.id=\(self.siteId)")
+                    // Clear to about:blank to dismiss the error UI
+                    tab.webView.loadHTMLString("", baseURL: nil)
+                    Telemetry.shared.recordUserAction(siteId: tab.site.id, action: "dismiss_error_page")
+                default:
+                    print("[WARN] ErrorMessageHandler: unknown action=\(action) for site.id=\(self.siteId)")
+                }
+            }
+        }
+    }
+}
+
 
 // Handle UI-level requests such as window.open. For safety, any attempt to open a URL outside the originating site's host is blocked and opened in the external browser instead.
 private final class SelfUIDelegate: NSObject, WKUIDelegate {

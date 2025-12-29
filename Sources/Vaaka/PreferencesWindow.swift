@@ -33,14 +33,10 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         let header = NSTextField(labelWithString: "Sites (Whitelist)")
         header.font = NSFont.boldSystemFont(ofSize: 14)
 
-        let nameColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
-        nameColumn.title = "Name"
-        nameColumn.width = 240
-        tableView.addTableColumn(nameColumn)
-
+        // Only show the site domain column — name is derived automatically from the host
         let urlColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("url"))
-        urlColumn.title = "Start URL"
-        urlColumn.width = 360
+        urlColumn.title = "Site"
+        urlColumn.width = 600
         tableView.addTableColumn(urlColumn)
 
         tableView.headerView = nil
@@ -51,6 +47,8 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // Support double-click to edit
         tableView.target = self
         tableView.doubleAction = #selector(editSelected)
+        // Allow single-click inline editing
+        tableView.delegate = self
 
         tableContainer = NSScrollView()
         tableContainer.documentView = tableView
@@ -60,7 +58,19 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         controls.orientation = .horizontal
         controls.spacing = 8
 
-        let stack = NSStackView(views: [header, tableContainer, controls])
+        // Hint and warning
+        let hintLabel = NSTextField(labelWithString: "Enter domains like example.com")
+        hintLabel.font = NSFont.systemFont(ofSize: 11)
+        hintLabel.textColor = NSColor.secondaryLabelColor
+
+        let warningLabel = NSTextField(labelWithString: "Note: This app doesn't work with all sites due to their security standards (e.g., Slack).")
+        warningLabel.font = NSFont.systemFont(ofSize: 11)
+        warningLabel.textColor = NSColor.systemRed
+        warningLabel.lineBreakMode = .byWordWrapping
+        warningLabel.maximumNumberOfLines = 0
+
+        // Place the warning at the bottom so it reads after the list and controls
+        let stack = NSStackView(views: [header, hintLabel, tableContainer, controls, warningLabel])
         stack.orientation = .vertical
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -77,47 +87,12 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
 
     // MARK: - Actions
     @objc private func addSite() {
-        let alert = NSAlert()
-        alert.messageText = "Add Site"
-        alert.informativeText = "Provide a name and start URL (e.g., https://example.com):"
-
-        let nameField = NSTextField(frame: NSRect(x: 0, y: 44, width: 420, height: 24))
-        nameField.placeholderString = "Site Name"
-        let urlField = NSTextField(frame: NSRect(x: 0, y: 12, width: 420, height: 24))
-        urlField.placeholderString = "https://example.com"
-
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 72))
-        container.addSubview(nameField)
-        container.addSubview(urlField)
-
-        alert.accessoryView = container
-        alert.addButton(withTitle: "Add")
-        alert.addButton(withTitle: "Cancel")
-        let res = alert.runModal()
-        if res == .alertFirstButtonReturn {
-            let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            var urlStr = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty, !urlStr.isEmpty else {
-                let a = NSAlert()
-                a.messageText = "Invalid input"
-                a.informativeText = "Name and domain are required."
-                a.runModal()
-                return
-            }
-
-            guard let normalized = SiteManager.normalizedURL(from: urlStr) else {
-                let a = NSAlert()
-                a.messageText = "Invalid domain or URL"
-                a.informativeText = "Please enter a valid domain (example.com) or URL (https://example.com)."
-                a.runModal()
-                return
-            }
-
-            let newSite = Site(id: UUID().uuidString, name: name, url: normalized, favicon: nil)
-            var s = SiteManager.shared.sites
-            s.append(newSite)
-            SiteManager.shared.replaceSites(s)
-            tableView.reloadData()
+        // Start inline editing on the trailing add-row instead of opening a modal
+        let addRow = SiteManager.shared.sites.count
+        tableView.reloadData()
+        // Ensure the row exists and start editing the cell
+        if addRow >= 0 {
+            tableView.editColumn(0, row: addRow, with: nil, select: true)
         }
     }
 
@@ -133,62 +108,46 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     @objc private func editSelected() {
         let selected = tableView.selectedRow
         guard selected >= 0 else { return }
-        let site = SiteManager.shared.sites[selected]
+        // Always start inline editing (no modal)
+        // If the trailing row was selected, it's the add row; otherwise it's an edit of an existing row
+        tableView.editColumn(0, row: selected, with: nil, select: true)
+    }
 
-        let alert = NSAlert()
-        alert.messageText = "Edit Site"
-        alert.informativeText = "Edit the name and start URL (e.g., example.com or https://example.com):"
+    // Allow single-click editing
+    func tableView(_ tableView: NSTableView, shouldEdit tableColumn: NSTableColumn?, row: Int) -> Bool {
+        return true
+    }
 
-        let nameField = NSTextField(frame: NSRect(x: 0, y: 44, width: 420, height: 24))
-        nameField.placeholderString = "Site Name"
-        nameField.stringValue = site.name
-        let urlField = NSTextField(frame: NSRect(x: 0, y: 12, width: 420, height: 24))
-        urlField.placeholderString = "example.com"
-        // show host rather than full scheme when possible for clarity
-        urlField.stringValue = site.url.host ?? site.url.absoluteString
-
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 72))
-        container.addSubview(nameField)
-        container.addSubview(urlField)
-
-        alert.accessoryView = container
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        let res = alert.runModal()
-        if res == .alertFirstButtonReturn {
-            let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            var urlStr = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty, !urlStr.isEmpty else { return }
-
-            if URL(string: urlStr)?.host == nil {
-                if let prefixed = URL(string: "https://\(urlStr)") {
-                    urlStr = prefixed.absoluteString
+    // Keep text color readable when rows are selected
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        let selected = tableView.selectedRow
+        for row in 0..<tableView.numberOfRows {
+            if let v = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) {
+                // find the text field in the view (could be the cell itself or a container)
+                if let tf = v as? NSTextField {
+                    tf.textColor = (row == selected) ? NSColor.selectedTextColor : NSColor.labelColor
+                } else {
+                    for sub in v.subviews {
+                        if let tf = sub as? NSTextField {
+                            tf.textColor = (row == selected) ? NSColor.selectedTextColor : NSColor.labelColor
+                        }
+                    }
                 }
             }
-
-            guard let u = URL(string: urlStr), u.host != nil else { return }
-
-            var s = SiteManager.shared.sites
-            let updated = Site(id: site.id, name: name, url: u, favicon: site.favicon)
-            s[selected] = updated
-            SiteManager.shared.replaceSites(s)
-            tableView.reloadData()
         }
     }
 
     // MARK: - Table
     func numberOfRows(in tableView: NSTableView) -> Int {
-        return SiteManager.shared.sites.count
+        // Allow an extra blank row for inline 'Add site' edits
+        return SiteManager.shared.sites.count + 1
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {
         guard let tf = obj.object as? NSTextField else { return }
         let row = tableView.row(for: tf)
         let col = tableView.column(for: tf)
-        guard row >= 0, row < SiteManager.shared.sites.count else { return }
-        var sites = SiteManager.shared.sites
-        let original = sites[row]
-        let colId = tableView.tableColumns[col].identifier.rawValue
+        let sitesCount = SiteManager.shared.sites.count
 
         func setError(_ message: String?) {
             if let msg = message {
@@ -202,22 +161,38 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             }
         }
 
-        if colId == "name" {
-            let newName = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !newName.isEmpty else {
-                setError("Name cannot be empty")
-                // revert to original
-                tf.stringValue = original.name
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { setError(nil) }
+        // If editing the trailing new-row, treat as Add
+        if row == sitesCount {
+            let urlStr = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !urlStr.isEmpty else { tf.stringValue = ""; return }
+            guard let normalized = SiteManager.normalizedURL(from: urlStr) else {
+                setError("Please enter a valid domain or URL (e.g. example.com or https://example.com)")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { setError(nil); tf.stringValue = "" }
                 return
             }
-            setError(nil)
-            guard newName != original.name else { return }
-            sites[row] = Site(id: original.id, name: newName, url: original.url, favicon: original.favicon)
-            SiteManager.shared.replaceSites(sites)
+            let host = normalized.host ?? normalized.absoluteString
+            let firstLabel = host.split(separator: ".").first.map { String($0).capitalized } ?? host
+            var s = SiteManager.shared.sites
+            let newSite = Site(id: UUID().uuidString, name: firstLabel, url: normalized, favicon: nil)
+            s.append(newSite)
+            SiteManager.shared.replaceSites(s)
             tableView.reloadData()
-        } else if colId == "url" {
-            var urlStr = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Select the newly added row
+            if let idx = SiteManager.shared.sites.firstIndex(where: { $0.id == newSite.id }) {
+                tableView.selectRowIndexes(IndexSet(integer: idx), byExtendingSelection: false)
+            }
+            return
+        }
+
+        // Otherwise editing an existing site
+        guard row >= 0, row < SiteManager.shared.sites.count else { return }
+        var sites = SiteManager.shared.sites
+        let original = sites[row]
+        let colId = tableView.tableColumns[col].identifier.rawValue
+
+        // Only url column exists now; validate and update host
+        if colId == "url" {
+            let urlStr = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !urlStr.isEmpty else {
                 setError("Domain cannot be empty")
                 tf.stringValue = original.url.host ?? original.url.absoluteString
@@ -230,7 +205,9 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
                 setError(nil)
                 // Only update if host changed
                 if normalized.host != original.url.host {
-                    sites[row] = Site(id: original.id, name: original.name, url: normalized, favicon: original.favicon)
+                    let host = normalized.host ?? normalized.absoluteString
+                    let firstLabel = host.split(separator: ".").first.map { String($0).capitalized } ?? host
+                    sites[row] = Site(id: original.id, name: firstLabel, url: normalized, favicon: original.favicon)
                     SiteManager.shared.replaceSites(sites)
                     tableView.reloadData()
                 } else {
@@ -248,28 +225,32 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let site = SiteManager.shared.sites[row]
-        if tableColumn?.identifier.rawValue == "name" {
-            let tf = NSTextField(string: site.name)
+        let sites = SiteManager.shared.sites
+        // If row is the trailing empty row, show placeholder for adding
+        if row >= sites.count {
+            let tf = NSTextField(string: "")
+            tf.placeholderString = "example.com"
             tf.isBordered = false
             tf.backgroundColor = .clear
             tf.lineBreakMode = .byTruncatingTail
             tf.isEditable = true
             tf.delegate = self
-            // Accessibility/hint
-            tf.toolTip = "Double-click or edit to change site name"
-            return tf
-        } else {
-            // Show only the host (example.com) to the user
-            let hostStr = site.url.host ?? site.url.absoluteString
-            let tf = NSTextField(string: hostStr)
-            tf.isBordered = false
-            tf.backgroundColor = .clear
-            tf.lineBreakMode = .byTruncatingTail
-            tf.isEditable = true
-            tf.delegate = self
-            tf.toolTip = "Double-click or edit to change domain (e.g. example.com)"
+            tf.textColor = NSColor.labelColor
+            tf.toolTip = "Enter a domain (e.g. example.com) and press Enter to add"
             return tf
         }
+
+        let site = sites[row]
+        // Single column table: show only the host (example.com) to the user
+        let hostStr = site.url.host ?? site.url.absoluteString
+        let tf = NSTextField(string: hostStr)
+        tf.isBordered = false
+        tf.backgroundColor = .clear
+        tf.lineBreakMode = .byTruncatingTail
+        tf.isEditable = true
+        tf.delegate = self
+        tf.textColor = NSColor.labelColor
+        tf.toolTip = "Double-click or edit to change domain (e.g. example.com)"
+        return tf
     }
 }
