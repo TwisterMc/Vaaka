@@ -142,13 +142,32 @@ final class SiteManager {
     /// Replace the sites array with a new ordered array and persist. (Used by Settings only.)
     func replaceSites(_ newSites: [Site]) {
         print("[DEBUG] SiteManager.replaceSites: replacing \(newSites.count) sites")
+
+        // Deduplicate sites by canonical host, preserving first occurrence and original order.
+        var seenHosts: Set<String> = []
+        var uniqueSites: [Site] = []
+        for site in newSites {
+            if let host = SiteManager.canonicalHost(site.url.host) {
+                if seenHosts.contains(host) {
+                    print("[DEBUG] SiteManager.replaceSites: duplicate site for host=\(host) id=\(site.id) ignored")
+                    continue
+                }
+                seenHosts.insert(host)
+                uniqueSites.append(site)
+            } else {
+                // If host normalization fails, keep the site to avoid accidental data loss
+                uniqueSites.append(site)
+            }
+        }
+
         let encoder = JSONEncoder()
-        let schema = FileSchema(version: "1.0", sites: newSites)
+        let schema = FileSchema(version: "1.0", sites: uniqueSites)
         if let data = try? encoder.encode(schema) {
             try? data.write(to: fileURL)
-            sites = newSites
+            sites = uniqueSites
+            print("[DEBUG] SiteManager.replaceSites: final sites count=\(sites.count) list=\(sites.map { "\($0.id):\($0.url.host ?? "<no-host>")" })")
             // After persisting, attempt to fetch missing favicons asynchronously
-            fetchMissingFaviconsIfNeeded(for: newSites)
+            fetchMissingFaviconsIfNeeded(for: uniqueSites)
         }
     }
 

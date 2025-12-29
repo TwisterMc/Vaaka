@@ -146,8 +146,29 @@ class BrowserWindowController: NSWindowController {
 
     // MARK: - UI updates
     @objc private func sitesChanged() {
+        // Diagnostic: log content container subviews before change
+        let beforeSubviews = contentContainer.subviews.count
+        print("[DEBUG] sitesChanged: contentContainer.subviews before=\(beforeSubviews) webViewsAttached=\(webViewsAttached)")
+
         rebuildRailButtons()
         attachAllWebViewsIfNeeded()
+
+        // Remove any orphaned WKWebViews whose site ids are no longer in the sites list
+        let currentSiteIds = Set(SiteTabManager.shared.tabs.map { $0.site.id })
+        var removed: [String] = []
+        for v in contentContainer.subviews {
+            if let wv = v as? WKWebView, let id = wv.identifier?.rawValue {
+                if !currentSiteIds.contains(id) {
+                    removed.append(id)
+                    print("[DEBUG] sitesChanged: removing orphaned webView for site.id=\(id)")
+                    wv.removeFromSuperview()
+                    webViewsAttached.remove(id)
+                }
+            }
+        }
+        let afterSubviews = contentContainer.subviews.count
+        print("[DEBUG] sitesChanged: contentContainer.subviews after=\(afterSubviews) removed=\(removed)")
+
         // If last active site got removed, SiteTabManager will have set activeIndex appropriately; update UI.
         activeTabChanged()
     }
@@ -199,9 +220,13 @@ class BrowserWindowController: NSWindowController {
         let tabs = SiteTabManager.shared.tabs
         for tab in tabs {
             if webViewsAttached.contains(tab.site.id) { continue }
+            // Diagnostic: log the state before attaching
+            print("[DEBUG] attachAllWebViewsIfNeeded: attaching site.id=\(tab.site.id) webView.url=\(tab.webView.url?.absoluteString ?? "<no-url>") webView.isHidden=\(tab.webView.isHidden) frame=\(tab.webView.frame)")
+
             // Attach once
             let webView = tab.webView
             webView.translatesAutoresizingMaskIntoConstraints = false
+            webView.identifier = NSUserInterfaceItemIdentifier(tab.site.id)
             contentContainer.addSubview(webView)
             NSLayoutConstraint.activate([
                 webView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
@@ -211,15 +236,24 @@ class BrowserWindowController: NSWindowController {
             ])
             webView.isHidden = true
             webViewsAttached.insert(tab.site.id)
+
+            // Diagnostic: confirm attached and state
+            print("[DEBUG] attachAllWebViewsIfNeeded: attached site.id=\(tab.site.id) webView.superview=\(webView.superview != nil) frame=\(webView.frame) isHidden=\(webView.isHidden)")
+
             // Start navigation only after the webview is attached to the view hierarchy
             tab.loadStartURLIfNeeded()
+            print("[DEBUG] attachAllWebViewsIfNeeded: called loadStartURLIfNeeded for site.id=\(tab.site.id)")
         }
     }
 
     private func setActiveWebViewVisibility(index: Int) {
         let tabs = SiteTabManager.shared.tabs
         for (i, tab) in tabs.enumerated() {
-            tab.webView.isHidden = (i != index)
+            let willHide = (i != index)
+            if tab.webView.isHidden != willHide {
+                print("[DEBUG] setActiveWebViewVisibility: site.id=\(tab.site.id) oldHidden=\(tab.webView.isHidden) newHidden=\(willHide) index=\(i) activeIndex=\(index) webView.url=\(tab.webView.url?.absoluteString ?? "<no-url>")")
+            }
+            tab.webView.isHidden = willHide
         }
     }
 

@@ -63,4 +63,16 @@ final class VaakaTests: XCTestCase {
         XCTAssertTrue(SiteManager.isValidDomainInput("example.com"))
         XCTAssertFalse(SiteManager.isValidDomainInput(""))
     }
+
+    func testReplaceSitesDedupsByHost() throws {
+        // Create two sites with same host but different ids
+        let host = "dupe.example.com"
+        let siteA = Site(id: "A", name: "A", url: URL(string: "https://dupe.example.com/path")!, favicon: nil)
+        let siteB = Site(id: "B", name: "B", url: URL(string: "https://www.dupe.example.com/other")!, favicon: nil)
+        SiteManager.shared.replaceSites([siteA, siteB])
+        let after = SiteManager.shared.sites
+        // Dedup should keep only the first (siteA)
+        XCTAssertEqual(after.count, 1)
+        XCTAssertEqual(after[0].id, "A")
+    }
 }

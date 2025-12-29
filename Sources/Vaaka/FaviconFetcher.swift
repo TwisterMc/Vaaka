@@ -30,7 +30,11 @@ class FaviconFetcher {
     private func fetchFromCandidateURLs(_ urls: [URL], completion: @escaping (NSImage?) -> Void) {
         var remaining = urls
         guard let first = remaining.first else { completion(nil); return }
-        let task = session.dataTask(with: first) { data, resp, err in
+        var req = URLRequest(url: first)
+        // Send a Safari-like User-Agent and accept images
+        req.setValue(UserAgent.safari, forHTTPHeaderField: "User-Agent")
+        req.setValue("image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        let task = session.dataTask(with: req) { data, resp, err in
             if let d = data, let img = NSImage(data: d) {
                 completion(img)
             } else {
@@ -46,6 +50,8 @@ class FaviconFetcher {
         var req = URLRequest(url: baseURL)
         req.httpMethod = "GET"
         req.setValue("text/html,application/xhtml+xml", forHTTPHeaderField: "Accept")
+        // Make requests appear like Safari to improve discovery on some sites
+        req.setValue(UserAgent.safari, forHTTPHeaderField: "User-Agent")
         let task = session.dataTask(with: req) { data, resp, err in
             guard let data = data, let html = String(data: data, encoding: .utf8) else { completion([]); return }
             let candidates = self.parseIconLinks(fromHTML: html, baseURL: baseURL)

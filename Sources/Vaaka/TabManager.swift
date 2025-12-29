@@ -56,17 +56,62 @@ final class SiteTabManager: NSObject {
 
     private func rebuildTabs() {
         let sites = SiteManager.shared.sites
-        // Create tabs in same order
+        // Diagnostic: log currently existing tabs and their URLs to help track unexpected blanking
+        let existingInfo = tabs.map { "\($0.site.id):\($0.webView.url?.absoluteString ?? "<no-url>")" }
+        print("[DEBUG] rebuildTabs: existing tabs count=\(tabs.count) info=\(existingInfo)")
+
+        // Create tabs in same order; reuse existing SiteTab instances where the site id is unchanged
         var newTabs: [SiteTab] = []
         print("[DEBUG] rebuildTabs: sites.count=\(sites.count)")
+
+        // Map existing tabs by site id for reuse
+        var existingById: [String: SiteTab] = [:]
+        for t in tabs { existingById[t.site.id] = t }
+
         for site in sites {
+            if let existing = existingById[site.id] {
+                print("[DEBUG] rebuildTabs: reusing tab for site id=\(site.id) name=\(site.name)")
+                newTabs.append(existing)
+                // Remove from existingById map — remaining entries will be considered removed
+                existingById.removeValue(forKey: site.id)
+                continue
+            }
+
             print("[DEBUG] rebuildTabs: creating tab for site id=\(site.id) name=\(site.name)")
             let config = WKWebViewConfiguration()
             let webpagePreferences = WKWebpagePreferences()
             webpagePreferences.allowsContentJavaScript = true
             config.defaultWebpagePreferences = webpagePreferences
+
+            // Diagnostics: forward console.* messages from pages to the host app for debugging
+            let userContent = WKUserContentController()
+            let consoleScript = """
+            (function () {
+              function serializeArgs(args) {
+                return Array.prototype.slice.call(args).map(function (a) {
+                  try { return typeof a === 'string' ? a : JSON.stringify(a); } catch (e) { return String(a); }
+                });
+              }
+              ['log','warn','error','info'].forEach(function(level) {
+                var orig = console[level];
+                console[level] = function() {
+                  try {
+                     window.webkit.messageHandlers.vaakaConsole.postMessage({level: level, args: serializeArgs(arguments)});
+                  } catch (e) {}
+                  orig && orig.apply(console, arguments);
+                };
+              });
+            })();
+            """
+            let script = WKUserScript(source: consoleScript, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+            userContent.addUserScript(script)
+            userContent.add(ConsoleMessageHandler(siteId: site.id), name: "vaakaConsole")
+            config.userContentController = userContent
+
             // Each WebView gets its own configuration
             let tab = SiteTab(site: site, configuration: config)
+            // Make the WebView appear like Safari to servers that vary content by UA
+            tab.webView.customUserAgent = UserAgent.safari
             // Navigation delegate to enforce whitelist (keep strong reference on the tab)
             let nav = SelfNavigationDelegate(site: site)
             tab.navigationDelegateStored = nav
@@ -78,7 +123,13 @@ final class SiteTabManager: NSObject {
             // Keep webviews loaded but hidden in UI (hide/show handled by BrowserWindow)
             newTabs.append(tab)
         }
+        // Any site ids still present in `existingById` are removed — their webviews should be cleaned by BrowserWindow
+        if !existingById.isEmpty {
+            print("[DEBUG] rebuildTabs: removed site ids=\(Array(existingById.keys))")
+        }
         tabs = newTabs
+        let newInfo = tabs.map { "\($0.site.id):\($0.webView.url?.absoluteString ?? "<no-url>")" }
+        print("[DEBUG] rebuildTabs: new tabs count=\(tabs.count) info=\(newInfo)")
         // Adjust active index to valid range
         if tabs.isEmpty {
             activeIndex = 0
@@ -156,15 +207,64 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
 
     // Notify BrowserWindow about start/finish to allow UI updates (loading indicators)
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        print("[DEBUG] navigation: didStartProvisionalNavigation for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") hidden=\(webView.isHidden) navigationNonNil=\(navigation != nil)")
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: site.id)
+        // Telemetry: record navigation start
+        Telemetry.shared.recordNavigationStart(siteId: site.id, url: webView.url)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        print("[DEBUG] navigation: didFinish for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") hidden=\(webView.isHidden)")
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
+        // Telemetry: record navigation finish
+        Telemetry.shared.recordNavigationFinish(siteId: site.id, url: webView.url)
+        // For diagnostics: capture the effective navigator.userAgent seen by pages so we can
+        // verify servers and scripts will see the desired Safari-like UA.
+        webView.evaluateJavaScript("navigator.userAgent") { result, error in
+            if let ua = result as? String {
+                print("[DEBUG] navigator.userAgent: site.id=\(self.site.id) ua=\(ua)")
+            } else if let err = error {
+                print("[DEBUG] navigator.userAgent: site.id=\(self.site.id) error=\(err)")
+            }
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        let nsErr = error as NSError
+        print("[WARN] navigation: didFailProvisionalNavigation for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") errorDomain=\(nsErr.domain) code=\(nsErr.code) desc=\(nsErr.localizedDescription) hidden=\(webView.isHidden)")
+        NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
+        // Telemetry: record failure
+        Telemetry.shared.recordNavigationFailure(siteId: site.id, url: webView.url, domain: nsErr.domain, code: nsErr.code, description: nsErr.localizedDescription)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        let nsErr = error as NSError
+        print("[WARN] navigation: didFail for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") errorDomain=\(nsErr.domain) code=\(nsErr.code) desc=\(nsErr.localizedDescription) hidden=\(webView.isHidden)")
+        NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
+        // Telemetry: record failure
+        Telemetry.shared.recordNavigationFailure(siteId: site.id, url: webView.url, domain: nsErr.domain, code: nsErr.code, description: nsErr.localizedDescription)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         decisionHandler(.allow)
+    }
+}
+
+private final class ConsoleMessageHandler: NSObject, WKScriptMessageHandler {
+    private let siteId: String
+    init(siteId: String) {
+        self.siteId = siteId
+    }
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "vaakaConsole" {
+            if let body = message.body as? [String: Any] {
+                let level = body["level"] as? String ?? "log"
+                let args = body["args"] as? [String] ?? []
+                print("[JS-\(level)] site.id=\(siteId) message=\(args.joined(separator: " "))")
+            } else {
+                print("[JS] site.id=\(siteId) message=\(message.body)")
+            }
+        }
     }
 }
 
