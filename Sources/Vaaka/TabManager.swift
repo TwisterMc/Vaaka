@@ -235,7 +235,10 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        DebugLogger.debug("navigation: didFinish for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") hidden=\(webView.isHidden)")
+        // Avoid noisy debug logs for hidden/offscreen webviews (e.g., background tabs)
+        if !webView.isHidden {
+            DebugLogger.debug("navigation: didFinish for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") hidden=\(webView.isHidden)")
+        }
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
         // Telemetry: record navigation finish
         Telemetry.shared.recordNavigationFinish(siteId: site.id, url: webView.url)

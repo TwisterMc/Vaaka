@@ -13,7 +13,9 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     private let sidebarItems = ["General", "Privacy"]
     // Remote update helper UI
     private var remoteStatusLabel: NSTextField?
-
+    private var importEasyButton: NSButton?
+    // Last-updated display
+    private var lastUpdatedLabel: NSTextField?
     convenience init() {
         let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 640, height: 360), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Preferences"
@@ -69,6 +71,9 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         controls.orientation = .horizontal
         controls.spacing = 8
 
+        // Diagnostics controls (logging level)
+        // Diagnostics controls removed — debug logging is now driven by environment variables only (disabled in code).
+
         // Hint and warning
         let hintLabel = NSTextField(labelWithString: "Enter domains like apple.com")
         hintLabel.font = NSFont.systemFont(ofSize: 11)
@@ -91,17 +96,28 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         warningLabel.maximumNumberOfLines = 0
 
         // Remote update controls for blocker
-        let autoUpdate = NSButton(checkboxWithTitle: "Auto-update block list from URL", target: self, action: #selector(toggleBlockerAutoUpdate(_:)))
-        autoUpdate.state = UserDefaults.standard.bool(forKey: "Vaaka.BlockerAutoUpdate") ? .on : .off
-        let updateNow = NSButton(title: "Update rules now", target: self, action: #selector(updateBlockerNow))
-        updateNow.bezelStyle = .rounded
-        updateNow.toolTip = "Fetch and compile remote blocker rules immediately"
+        // EasyList-only controls
+        let importEasy = NSButton(title: "Update EasyList", target: self, action: #selector(importEasyListPressed))
+        importEasy.bezelStyle = .rounded
+        importEasy.toolTip = "Fetch EasyList and convert to content-blocker rules"
 
-        let remoteURL = NSTextField(string: UserDefaults.standard.string(forKey: "Vaaka.BlockerRemoteURL") ?? "")
-        remoteURL.placeholderString = "https://example.com/blocker.json"
-        remoteURL.isBordered = true
-        remoteURL.translatesAutoresizingMaskIntoConstraints = false
-        remoteURL.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        // Last-updated label
+        let lastUpdatedLabel = NSTextField(labelWithString: "Last updated: " + (ContentBlockerManager.shared.lastUpdatedString() ?? "Never"))
+        lastUpdatedLabel.font = NSFont.systemFont(ofSize: 11)
+        lastUpdatedLabel.textColor = NSColor.secondaryLabelColor
+        lastUpdatedLabel.alignment = .left
+        lastUpdatedLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        // Keep references (assigned after statusLabel is created below)
+        self.importEasyButton = importEasy
+        self.lastUpdatedLabel = lastUpdatedLabel
+
+        // Accessibility
+        importEasy.setAccessibilityLabel("Update EasyList now")
+
+        // For layout, select the General pane by default (General will be visible)
+        // and ensure import button is enabled/visible based on BlockTrackers pref
+        self.importEasyButton?.isEnabled = UserDefaults.standard.bool(forKey: "Vaaka.BlockTrackers")
 
         // Settings-style UI: Sidebar + Detail panes
 
@@ -124,7 +140,6 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         sidebarTable.addTableColumn(col)
 
         sidebarContainer.documentView = sidebarTable
-        content.addSubview(sidebarContainer)
 
         // Keep a reference and set delegate/datasource
         self.sidebarTable = sidebarTable
@@ -149,7 +164,8 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         NSLayoutConstraint.activate([
             sitesStack.leadingAnchor.constraint(equalTo: generalPane.leadingAnchor, constant: 12),
             sitesStack.trailingAnchor.constraint(equalTo: generalPane.trailingAnchor, constant: -12),
-            sitesStack.topAnchor.constraint(equalTo: generalPane.topAnchor, constant: 12)
+            sitesStack.topAnchor.constraint(equalTo: generalPane.topAnchor, constant: 12),
+            sitesStack.bottomAnchor.constraint(equalTo: generalPane.bottomAnchor, constant: -12)
         ])
 
         // Privacy pane
@@ -166,22 +182,26 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         statusLabel.alignment = .left
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let urlRow = NSStackView(views: [remoteURL, updateNow, statusLabel])
+        let urlRow = NSStackView(views: [importEasy, statusLabel, lastUpdatedLabel])
         urlRow.orientation = .horizontal
-        urlRow.spacing = 8
+        urlRow.spacing = 12
         urlRow.alignment = .centerY
         urlRow.translatesAutoresizingMaskIntoConstraints = false
-        remoteURL.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        updateNow.setContentHuggingPriority(.required, for: .horizontal)
-
+        importEasy.setContentHuggingPriority(.required, for: .horizontal)
         // Keep references
         self.remoteStatusLabel = statusLabel
+        // add import button to view hierarchy later (used in layout)
+        self.importEasyButton = importEasy
+        self.lastUpdatedLabel = lastUpdatedLabel
+
+        // remove deprecated fields
+        self.blockerRemoteURLField = nil
 
         // Accessibility
-        remoteURL.setAccessibilityLabel("Block list URL")
-        updateNow.setAccessibilityLabel("Update block rules now")
+        // (No custom URL or updateNow — EasyList only)
 
-        let privacyStack = NSStackView(views: [privacyHeader, blockTrackers, sendDNT, autoUpdate, urlRow])
+
+        let privacyStack = NSStackView(views: [privacyHeader, blockTrackers, sendDNT, urlRow])
         privacyStack.orientation = .vertical
         privacyStack.alignment = .leading
         privacyStack.spacing = 10
@@ -191,8 +211,8 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             privacyStack.leadingAnchor.constraint(equalTo: privacyPane.leadingAnchor, constant: 12),
             privacyStack.trailingAnchor.constraint(equalTo: privacyPane.trailingAnchor, constant: -12),
             privacyStack.topAnchor.constraint(equalTo: privacyPane.topAnchor, constant: 12),
-            // Keep the remote URL a reasonable width (50% of the privacy pane) to avoid an oversized field
-            remoteURL.widthAnchor.constraint(lessThanOrEqualTo: privacyPane.widthAnchor, multiplier: 0.5)
+
+            privacyStack.bottomAnchor.constraint(equalTo: privacyPane.bottomAnchor, constant: -12)
         ])
 
         // Container split: place the sidebar scroll view followed by the detail pane container
@@ -250,6 +270,19 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             warningLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12)
         ])
 
+        // DEBUG: log subview frames and hit test results to diagnose unresponsive controls
+        DebugLogger.debug("Preferences content subviews:")
+        for v in content.subviews {
+            DebugLogger.debug("  - \(type(of: v)) frame=\(v.frame) isHidden=\(v.isHidden)")
+        }
+        // Test hitTest at center and near left/right to see what view would receive clicks
+        let center = NSPoint(x: content.bounds.midX, y: content.bounds.midY)
+        if let h = content.hitTest(center) { DebugLogger.debug("hitTest center -> \(type(of: h)) frame=\(h.frame)") }
+        let left = NSPoint(x: content.bounds.minX + 40, y: content.bounds.midY)
+        if let hl = content.hitTest(left) { DebugLogger.debug("hitTest left -> \(type(of: hl)) frame=\(hl.frame)") }
+        let right = NSPoint(x: content.bounds.maxX - 40, y: content.bounds.midY)
+        if let hr = content.hitTest(right) { DebugLogger.debug("hitTest right -> \(type(of: hr)) frame=\(hr.frame)") }
+
         // Keep references for swapping
         self.generalPane = generalPane
         self.privacyPane = privacyPane
@@ -261,9 +294,8 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // local actions and references
         blockTrackers.target = self
         sendDNT.target = self
-        autoUpdate.target = self
-        updateNow.target = self
-        self.blockerRemoteURLField = remoteURL
+        importEasy.target = self
+        self.importEasyButton = importEasy
     }
 
     // MARK: - Actions
@@ -306,11 +338,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         UserDefaults.standard.set(on, forKey: "Vaaka.SendDNT")
     }
 
-    @objc private func toggleBlockerAutoUpdate(_ sender: NSButton) {
-        let on = sender.state == .on
-        UserDefaults.standard.set(on, forKey: "Vaaka.BlockerAutoUpdate")
-        ContentBlockerManager.shared.updateRulesFromRemoteIfNeeded()
-    }
+
 
     @objc private func updateBlockerNow() {
         guard let urlStr = blockerRemoteURLField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), !urlStr.isEmpty, let url = URL(string: urlStr) else { return }
@@ -332,6 +360,25 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
                     self.remoteStatusLabel?.stringValue = ""
                 }
+            }
+        }
+    }
+
+    @objc private func importEasyListPressed() {
+        // well-known raw EasyList URL in the upstream GitHub
+        guard let url = URL(string: "https://raw.githubusercontent.com/easylist/easylist/master/easylist_general_block.txt") else { return }
+        remoteStatusLabel?.stringValue = "Importing EasyList…"
+        remoteStatusLabel?.textColor = NSColor.secondaryLabelColor
+        ContentBlockerManager.shared.fetchAndConvertEasyList(from: url) { success in
+            DispatchQueue.main.async {
+                if success {
+                    self.remoteStatusLabel?.stringValue = "EasyList imported"
+                    self.remoteStatusLabel?.textColor = NSColor.systemGreen
+                } else {
+                    self.remoteStatusLabel?.stringValue = "Import failed"
+                    self.remoteStatusLabel?.textColor = NSColor.systemRed
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { self.remoteStatusLabel?.stringValue = "" }
             }
         }
     }
@@ -361,6 +408,8 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         }
         detailPane = (pane == .general) ? generalPane : privacyPane
     }
+
+
 
 
 

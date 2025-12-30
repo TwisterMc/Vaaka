@@ -14,6 +14,9 @@ final class DebugLogger {
         return .info
     }()
 
+    // reload is a no-op when logging is driven only by environment variables
+    static func reload() { /* no-op: logging controlled by environment */ }
+
     private static func shouldLog(_ level: Level) -> Bool {
         return levelPriority(level) >= levelPriority(configuredLevel)
     }
