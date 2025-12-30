@@ -110,6 +110,8 @@ final class SiteTabManager: NSObject {
             userContent.add(ConsoleMessageHandler(siteId: site.id), name: "vaakaConsole")
             // Error page handler receives actions from our internal error page (retry/open/dismiss)
             userContent.add(ErrorMessageHandler(siteId: site.id), name: "vaakaError")
+            // Add tracker-blocking rules if the feature is enabled and compiled
+            ContentBlockerManager.shared.addTo(userContentController: userContent)
             config.userContentController = userContent
 
             // Each WebView gets its own configuration

@@ -63,14 +63,24 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         hintLabel.font = NSFont.systemFont(ofSize: 11)
         hintLabel.textColor = NSColor.secondaryLabelColor
 
+        // Privacy controls (block trackers, DNT)
+        let blockTrackers = NSButton(checkboxWithTitle: "Block trackers and ads", target: self, action: #selector(toggleBlockTrackers(_:)))
+        blockTrackers.state = UserDefaults.standard.bool(forKey: "Vaaka.BlockTrackers") ? .on : .off
+        blockTrackers.toolTip = "Block common trackers and ads using a content rule list"
+
+        let sendDNT = NSButton(checkboxWithTitle: "Send 'Do Not Track' header", target: self, action: #selector(toggleSendDNT(_:)))
+        sendDNT.state = UserDefaults.standard.bool(forKey: "Vaaka.SendDNT") ? .on : .off
+        sendDNT.toolTip = "Send DNT: 1 for top-level page loads when enabled"
+
+        // Warning label (place near bottom)
         let warningLabel = NSTextField(labelWithString: "Note: This app doesn't work with all sites due to their security standards (e.g., Slack).")
         warningLabel.font = NSFont.systemFont(ofSize: 11)
         warningLabel.textColor = NSColor.systemRed
         warningLabel.lineBreakMode = .byWordWrapping
         warningLabel.maximumNumberOfLines = 0
 
-        // Place the warning at the bottom so it reads after the list and controls
-        let stack = NSStackView(views: [header, hintLabel, tableContainer, controls, warningLabel])
+        // Place the privacy controls and list
+        let stack = NSStackView(views: [header, hintLabel, blockTrackers, sendDNT, tableContainer, controls, warningLabel])
         stack.orientation = .vertical
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -83,6 +93,10 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
             tableContainer.heightAnchor.constraint(equalToConstant: 240)
         ])
+
+        // local actions
+        blockTrackers.target = self
+        sendDNT.target = self
     }
 
     // MARK: - Actions
@@ -111,6 +125,18 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // Always start inline editing (no modal)
         // If the trailing row was selected, it's the add row; otherwise it's an edit of an existing row
         tableView.editColumn(0, row: selected, with: nil, select: true)
+    }
+
+    @objc private func toggleBlockTrackers(_ sender: NSButton) {
+        let on = sender.state == .on
+        UserDefaults.standard.set(on, forKey: "Vaaka.BlockTrackers")
+        if on { _ = ContentBlockerManager.shared } // will compile async
+        // For immediate effect, compile/apply is handled by the manager via observer
+    }
+
+    @objc private func toggleSendDNT(_ sender: NSButton) {
+        let on = sender.state == .on
+        UserDefaults.standard.set(on, forKey: "Vaaka.SendDNT")
     }
 
     // Allow single-click editing

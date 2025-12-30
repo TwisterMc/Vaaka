@@ -110,7 +110,11 @@ final class SiteTab: NSObject {
     func loadStartURLIfNeeded() {
         guard !hasLoadedStartURL else { return }
         hasLoadedStartURL = true
-        let req = URLRequest(url: site.url)
+        var req = URLRequest(url: site.url)
+        // If Send-DNT is enabled, include the DNT header for top-level loads
+        if UserDefaults.standard.bool(forKey: "Vaaka.SendDNT") {
+            req.setValue("1", forHTTPHeaderField: "DNT")
+        }
 
         // Optional diagnostic: temporarily unhide the WebView for the first load if the test flag is present.
         if ProcessInfo.processInfo.arguments.contains("--test-unhide-before-load") {

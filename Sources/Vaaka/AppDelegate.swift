@@ -79,6 +79,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         saveSession()
     }
 
+    // MARK: - Menu actions
+    @objc func openPrivacySettings(_ sender: Any?) {
+        // Attempt to open System Settings > Privacy & Security. This URL scheme may vary by macOS version.
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy") {
+            if !NSWorkspace.shared.open(url) {
+                // fallback: open System Settings app
+                NSWorkspace.shared.launchApplication("System Settings")
+            }
+        } else {
+            NSWorkspace.shared.launchApplication("System Settings")
+        }
+    }
+
+    @objc func openHelp(_ sender: Any?) {
+        if let url = URL(string: "https://example.com/help") { NSWorkspace.shared.open(url) }
+    }
+
     @objc func openPreferences(_ sender: Any?) {
         if preferencesWindowController == nil {
             preferencesWindowController = PreferencesWindowController()
@@ -101,9 +118,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "About \(appName)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Preferences...", action: #selector(openPreferences(_:)), keyEquivalent: ",")
+        appMenu.addItem(withTitle: "Privacy & Security…", action: #selector(openPrivacySettings(_:)), keyEquivalent: "p")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
+
+        // File menu (minimal)
+        let fileMenuItem = NSMenuItem()
+        mainMenu.addItem(fileMenuItem)
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileMenuItem.submenu = fileMenu
+
+        // Edit menu
+        let editMenuItem = NSMenuItem()
+        mainMenu.addItem(editMenuItem)
+        let editMenu = NSMenu(title: "Edit")
+        // Standard edit actions forwarded to first responder
+        editMenu.addItem(withTitle: "Undo", action: NSSelectorFromString("undo:"), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: NSSelectorFromString("redo:"), keyEquivalent: "Z")
+        editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(NSMenuItem.separator())
+        // Spelling & Grammar submenu - actions go to first responder (NSTextView will respond)
+        let spellingItem = NSMenuItem(title: "Spelling and Grammar", action: nil, keyEquivalent: "")
+        let spellingSub = NSMenu(title: "Spelling and Grammar")
+        spellingSub.addItem(NSMenuItem(title: "Show Spelling and Grammar…", action: NSSelectorFromString("showGuessPanel:"), keyEquivalent: ""))
+        spellingSub.addItem(NSMenuItem(title: "Check Document Now", action: NSSelectorFromString("checkSpelling:"), keyEquivalent: ""))
+        spellingSub.addItem(NSMenuItem.separator())
+        spellingSub.addItem(NSMenuItem(title: "Check Spelling While Typing", action: NSSelectorFromString("toggleContinuousSpellChecking:"), keyEquivalent: ""))
+        spellingItem.submenu = spellingSub
+        editMenu.addItem(spellingItem)
+        editMenuItem.submenu = editMenu
+
+        // Window menu
+        let windowMenuItem = NSMenuItem()
+        mainMenu.addItem(windowMenuItem)
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenuItem.submenu = windowMenu
+
+        // Help menu
+        let helpMenuItem = NSMenuItem()
+        mainMenu.addItem(helpMenuItem)
+        let helpMenu = NSMenu(title: "Help")
+        helpMenu.addItem(withTitle: "Vaaka Help & Feedback…", action: #selector(openHelp(_:)), keyEquivalent: "?")
+        helpMenuItem.submenu = helpMenu
 
         NSApp.mainMenu = mainMenu
     }
