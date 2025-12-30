@@ -189,8 +189,10 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         if let scheme = url.scheme?.lowercased(), scheme == "data" || scheme == "blob" || scheme == "about" || url.absoluteString.hasPrefix("about:") {
             return decisionHandler(.allow)
         }
-        // Allow in-page navigation and navigations that remain within the owning site's domain (subdomains allowed)
-        if SiteManager.shared.site(for: url) == site {
+        // Allow in-page navigation and navigations that remain within the owning site's domain (subdomains allowed).
+        // Use hostMatches directly to avoid relying on Site (value) equality which may be brittle across reloads.
+        if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
+            DebugLogger.debug("Allowing same-site navigation for site.id=\(site.id) urlHost=\(urlHost)")
             return decisionHandler(.allow)
         }
 
@@ -204,14 +206,16 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
             }
 
             // If the link looks like an SSO/IdP target, open externally by default to avoid embedded-browser failures.
-            if SSODetector.isSSO(url) {
-                DebugLogger.debug("Detected SSO/IdP target -> opening externally: \(url)")
+            let isSSO = SSODetector.isSSO(url)
+            DebugLogger.debug("linkActivated: site.id=\(site.id) url=\(url) isSSO=\(isSSO) siteHost=\(site.url.host ?? "<no-host>") matchedSite=\(SiteManager.shared.site(for: url)?.id ?? "<none>")")
+            if isSSO {
+                DebugLogger.info("Detected SSO/IdP target -> opening externally: \(url)")
                 Telemetry.shared.recordExternalOpen(siteId: site.id, url: url)
                 NSWorkspace.shared.open(url)
                 return decisionHandler(.cancel)
             }
 
-            DebugLogger.debug("User clicked external link -> opening in default browser: \(url)")
+            DebugLogger.info("User clicked external link -> opening in default browser: \(url)")
             Telemetry.shared.recordExternalOpen(siteId: site.id, url: url)
             NSWorkspace.shared.open(url)
             return decisionHandler(.cancel)
