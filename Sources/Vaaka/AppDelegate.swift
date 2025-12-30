@@ -84,11 +84,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Attempt to open System Settings > Privacy & Security. This URL scheme may vary by macOS version.
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy") {
             if !NSWorkspace.shared.open(url) {
-                // fallback: open System Settings app
-                NSWorkspace.shared.launchApplication("System Settings")
+                // fallback: open the System Settings app using the modern API
+                if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.SystemSettings") {
+                    let cfg = NSWorkspace.OpenConfiguration()
+                    NSWorkspace.shared.openApplication(at: appURL, configuration: cfg) { _, err in
+                        if let e = err { DebugLogger.warn("Failed to open System Settings via modern API: \(e)") }
+                    }
+                } else {
+                    DebugLogger.warn("Could not locate System Settings application")
+                }
             }
         } else {
-            NSWorkspace.shared.launchApplication("System Settings")
+            if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.SystemSettings") {
+                let cfg = NSWorkspace.OpenConfiguration()
+                NSWorkspace.shared.openApplication(at: appURL, configuration: cfg) { _, err in
+                    if let e = err { DebugLogger.warn("Failed to open System Settings via modern API: \(e)") }
+                }
+            } else {
+                DebugLogger.warn("Could not locate System Settings application")
+            }
         }
     }
 

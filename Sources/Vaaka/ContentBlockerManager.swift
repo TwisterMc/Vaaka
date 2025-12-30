@@ -28,6 +28,26 @@ final class ContentBlockerManager {
 
     private func compileIfNeeded() {
         if compiled != nil { return }
+        // Load any locally persisted rules (from remote updates) preferentially
+        if let local = loadPersistedRules() {
+            WKContentRuleListStore.default().compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: local) { [weak self] (list, error) in
+                if let err = error {
+                    DebugLogger.warn("ContentBlocker compile from persisted rules failed: \(err) — falling back to builtin rules")
+                    // Fall back to builtin rules
+                    self?.compileBuiltin()
+                    return
+                }
+                guard let l = list else { self?.compileBuiltin(); return }
+                DebugLogger.info("ContentBlocker compiled from persisted rules")
+                self?.compiled = l
+                DispatchQueue.main.async { self?.applyToExistingTabs(l) }
+            }
+            return
+        }
+        compileBuiltin()
+    }
+
+    private func compileBuiltin() {
         let rules = defaultRulesJSON()
         WKContentRuleListStore.default().compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: rules) { [weak self] (list, error) in
             if let err = error {
@@ -35,14 +55,15 @@ final class ContentBlockerManager {
                 return
             }
             guard let l = list else { return }
-            DebugLogger.info("ContentBlocker compiled: id=\(self?.identifier ?? "<id>")")
+            DebugLogger.info("ContentBlocker compiled: id=\(self?.identifier ?? "<id>") (built-in)")
             self?.compiled = l
-            // Apply to any existing webviews
-            DispatchQueue.main.async {
-                for tab in SiteTabManager.shared.tabs {
-                    tab.webView.configuration.userContentController.add(l)
-                }
-            }
+            DispatchQueue.main.async { self?.applyToExistingTabs(l) }
+        }
+    }
+
+    private func applyToExistingTabs(_ l: WKContentRuleList) {
+        for tab in SiteTabManager.shared.tabs {
+            tab.webView.configuration.userContentController.add(l)
         }
     }
 
@@ -53,6 +74,54 @@ final class ContentBlockerManager {
             // kick off compile if not yet compiled
             compileIfNeeded()
         }
+    }
+
+    // MARK: - Remote update support
+    /// If the user enables auto-updates and provides a URL, fetch rules and persist locally.
+    func updateRulesFromRemoteIfNeeded() {
+        guard UserDefaults.standard.bool(forKey: "Vaaka.BlockerAutoUpdate") else { return }
+        guard let urlStr = UserDefaults.standard.string(forKey: "Vaaka.BlockerRemoteURL"), let url = URL(string: urlStr) else { return }
+        fetchRemoteRules(url: url) { success in
+            DebugLogger.info("ContentBlocker remote update completed success=\(success)")
+        }
+    }
+
+    func fetchRemoteRules(url: URL, completion: @escaping (Bool) -> Void) {
+        let req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        let t = URLSession.shared.dataTask(with: req) { data, resp, err in
+            if let e = err { DebugLogger.warn("ContentBlocker remote fetch failed: \(e)"); completion(false); return }
+            guard let d = data, let s = String(data: d, encoding: .utf8) else { DebugLogger.warn("ContentBlocker remote fetch: invalid data"); completion(false); return }
+            // Basic validation: must decode as JSON array and contain objects with trigger/action
+            if (try? JSONSerialization.jsonObject(with: d)) == nil {
+                DebugLogger.warn("ContentBlocker remote fetch: JSON validation failed")
+                completion(false); return
+            }
+            // Persist the fetched rules and schedule compile
+            if self.persistRules(s) {
+                DispatchQueue.main.async { self.compiled = nil; self.compileIfNeeded(); completion(true) }
+            } else { completion(false) }
+        }
+        t.resume()
+    }
+
+    private func persistRules(_ rules: String) -> Bool {
+        guard let url = persistURLForRules() else { return false }
+        do { try rules.write(to: url, atomically: true, encoding: .utf8); return true } catch { DebugLogger.warn("Failed to persist blocker rules: \(error)"); return false }
+    }
+
+    private func loadPersistedRules() -> String? {
+        guard let url = persistURLForRules() else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }
+
+    private func persistURLForRules() -> URL? {
+        let fm = FileManager.default
+        if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let dir = appSupport.appendingPathComponent("Vaaka", isDirectory: true)
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir.appendingPathComponent("blocker_rules.json")
+        }
+        return nil
     }
 
     private func defaultRulesJSON() -> String {

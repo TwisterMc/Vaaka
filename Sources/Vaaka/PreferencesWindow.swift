@@ -79,8 +79,21 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         warningLabel.lineBreakMode = .byWordWrapping
         warningLabel.maximumNumberOfLines = 0
 
+        // Remote update controls for blocker
+        let autoUpdate = NSButton(checkboxWithTitle: "Auto-update block list from URL", target: self, action: #selector(toggleBlockerAutoUpdate(_:)))
+        autoUpdate.state = UserDefaults.standard.bool(forKey: "Vaaka.BlockerAutoUpdate") ? .on : .off
+        let updateNow = NSButton(title: "Update rules now", target: self, action: #selector(updateBlockerNow))
+        updateNow.bezelStyle = .rounded
+        updateNow.toolTip = "Fetch and compile remote blocker rules immediately"
+
+        let remoteURL = NSTextField(string: UserDefaults.standard.string(forKey: "Vaaka.BlockerRemoteURL") ?? "")
+        remoteURL.placeholderString = "https://example.com/blocker.json"
+        remoteURL.isBordered = true
+        remoteURL.translatesAutoresizingMaskIntoConstraints = false
+        remoteURL.widthAnchor.constraint(equalToConstant: 420).isActive = true
+
         // Place the privacy controls and list
-        let stack = NSStackView(views: [header, hintLabel, blockTrackers, sendDNT, tableContainer, controls, warningLabel])
+        let stack = NSStackView(views: [header, hintLabel, blockTrackers, sendDNT, autoUpdate, remoteURL, updateNow, tableContainer, controls, warningLabel])
         stack.orientation = .vertical
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -97,6 +110,10 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // local actions
         blockTrackers.target = self
         sendDNT.target = self
+        // remember controls for later actions
+        self.blockerRemoteURLField = remoteURL
+        autoUpdate.target = self
+        updateNow.target = self
     }
 
     // MARK: - Actions
@@ -139,6 +156,24 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         UserDefaults.standard.set(on, forKey: "Vaaka.SendDNT")
     }
 
+    @objc private func toggleBlockerAutoUpdate(_ sender: NSButton) {
+        let on = sender.state == .on
+        UserDefaults.standard.set(on, forKey: "Vaaka.BlockerAutoUpdate")
+        ContentBlockerManager.shared.updateRulesFromRemoteIfNeeded()
+    }
+
+    @objc private func updateBlockerNow() {
+        guard let urlStr = blockerRemoteURLField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), !urlStr.isEmpty, let url = URL(string: urlStr) else { return }
+        UserDefaults.standard.set(urlStr, forKey: "Vaaka.BlockerRemoteURL")
+        ContentBlockerManager.shared.fetchRemoteRules(url: url) { success in
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = success ? "Block list updated" : "Failed to update block list"
+                alert.runModal()
+            }
+        }
+    }
+
     // Allow single-click editing
     func tableView(_ tableView: NSTableView, shouldEdit tableColumn: NSTableColumn?, row: Int) -> Bool {
         return true
@@ -168,6 +203,9 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // Allow an extra blank row for inline 'Add site' edits
         return SiteManager.shared.sites.count + 1
     }
+
+    // MARK: - Remote blocker helpers (fields)
+    private var blockerRemoteURLField: NSTextField? = nil
 
     func controlTextDidEndEditing(_ obj: Notification) {
         guard let tf = obj.object as? NSTextField else { return }
