@@ -3,6 +3,16 @@ import AppKit
 class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private let tableView = NSTableView()
     private var tableContainer: NSScrollView!
+    // Detail pane references for Settings-style sheet
+    private var detailPane: NSView?
+    private var generalPane: NSView?
+    private var privacyPane: NSView?
+    private var splitStack: NSStackView?
+    // Sidebar source-list
+    private var sidebarTable: NSTableView?
+    private let sidebarItems = ["General", "Privacy"]
+    // Remote update helper UI
+    private var remoteStatusLabel: NSTextField?
 
     convenience init() {
         let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 640, height: 360), styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -32,6 +42,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
 
         let header = NSTextField(labelWithString: "Sites (Whitelist)")
         header.font = NSFont.boldSystemFont(ofSize: 14)
+        header.alignment = .left
 
         // Only show the site domain column — name is derived automatically from the host
         let urlColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("url"))
@@ -92,28 +103,167 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         remoteURL.translatesAutoresizingMaskIntoConstraints = false
         remoteURL.widthAnchor.constraint(equalToConstant: 420).isActive = true
 
-        // Place the privacy controls and list
-        let stack = NSStackView(views: [header, hintLabel, blockTrackers, sendDNT, autoUpdate, remoteURL, updateNow, tableContainer, controls, warningLabel])
-        stack.orientation = .vertical
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(stack)
+        // Settings-style UI: Sidebar + Detail panes
 
+        // Sidebar: using a source-list-style NSTableView for accessibility and HIG compliance
+        let sidebarContainer = NSScrollView()
+        sidebarContainer.hasVerticalScroller = true
+        sidebarContainer.translatesAutoresizingMaskIntoConstraints = false
+        sidebarContainer.borderType = .noBorder
+
+        let sidebarTable = NSTableView()
+        sidebarTable.headerView = nil
+        sidebarTable.focusRingType = .none
+        sidebarTable.rowHeight = 44
+        sidebarTable.intercellSpacing = NSSize(width: 0, height: 4)
+        sidebarTable.selectionHighlightStyle = .regular
+        sidebarTable.translatesAutoresizingMaskIntoConstraints = false
+
+        let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("sidebar"))
+        col.width = 140
+        sidebarTable.addTableColumn(col)
+
+        sidebarContainer.documentView = sidebarTable
+        content.addSubview(sidebarContainer)
+
+        // Keep a reference and set delegate/datasource
+        self.sidebarTable = sidebarTable
+        sidebarTable.delegate = self
+        sidebarTable.dataSource = self
+        sidebarTable.target = self
+        sidebarTable.action = #selector(sidebarTableClicked(_:))
+        sidebarTable.focusRingType = .default
+        sidebarTable.setAccessibilityLabel("Preferences Sidebar")
+
+        // Select first row by default (General)
+        DispatchQueue.main.async { sidebarTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }
+
+        // General pane
+        let generalPane = NSView()
+        generalPane.translatesAutoresizingMaskIntoConstraints = false
+        let sitesStack = NSStackView(views: [header, hintLabel, tableContainer, controls])
+        sitesStack.orientation = .vertical
+        sitesStack.spacing = 8
+        sitesStack.translatesAutoresizingMaskIntoConstraints = false
+        generalPane.addSubview(sitesStack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
-            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
-            tableContainer.heightAnchor.constraint(equalToConstant: 240)
+            sitesStack.leadingAnchor.constraint(equalTo: generalPane.leadingAnchor, constant: 12),
+            sitesStack.trailingAnchor.constraint(equalTo: generalPane.trailingAnchor, constant: -12),
+            sitesStack.topAnchor.constraint(equalTo: generalPane.topAnchor, constant: 12)
         ])
 
-        // local actions
+        // Privacy pane
+        let privacyPane = NSView()
+        privacyPane.translatesAutoresizingMaskIntoConstraints = false
+        let privacyHeader = NSTextField(labelWithString: "Privacy & Blocking")
+        privacyHeader.font = NSFont.boldSystemFont(ofSize: 13)
+        privacyHeader.textColor = NSColor.labelColor
+        privacyHeader.alignment = .left
+        // URL row: remote field, copy button, update button and inline status
+        let statusLabel = NSTextField(labelWithString: "")
+        statusLabel.font = NSFont.systemFont(ofSize: 11)
+        statusLabel.textColor = NSColor.secondaryLabelColor
+        statusLabel.alignment = .left
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let urlRow = NSStackView(views: [remoteURL, updateNow, statusLabel])
+        urlRow.orientation = .horizontal
+        urlRow.spacing = 8
+        urlRow.alignment = .centerY
+        urlRow.translatesAutoresizingMaskIntoConstraints = false
+        remoteURL.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        updateNow.setContentHuggingPriority(.required, for: .horizontal)
+
+        // Keep references
+        self.remoteStatusLabel = statusLabel
+
+        // Accessibility
+        remoteURL.setAccessibilityLabel("Block list URL")
+        updateNow.setAccessibilityLabel("Update block rules now")
+
+        let privacyStack = NSStackView(views: [privacyHeader, blockTrackers, sendDNT, autoUpdate, urlRow])
+        privacyStack.orientation = .vertical
+        privacyStack.alignment = .leading
+        privacyStack.spacing = 10
+        privacyStack.translatesAutoresizingMaskIntoConstraints = false
+        privacyPane.addSubview(privacyStack)
+        NSLayoutConstraint.activate([
+            privacyStack.leadingAnchor.constraint(equalTo: privacyPane.leadingAnchor, constant: 12),
+            privacyStack.trailingAnchor.constraint(equalTo: privacyPane.trailingAnchor, constant: -12),
+            privacyStack.topAnchor.constraint(equalTo: privacyPane.topAnchor, constant: 12),
+            // Keep the remote URL a reasonable width (50% of the privacy pane) to avoid an oversized field
+            remoteURL.widthAnchor.constraint(lessThanOrEqualTo: privacyPane.widthAnchor, multiplier: 0.5)
+        ])
+
+        // Container split: place the sidebar scroll view followed by the detail pane container
+        let detailContainer = NSView()
+        detailContainer.translatesAutoresizingMaskIntoConstraints = false
+        let splitStack = NSStackView(views: [sidebarContainer, detailContainer])
+        splitStack.orientation = .horizontal
+        splitStack.spacing = 16
+        splitStack.alignment = .top
+        splitStack.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(splitStack)
+
+        // Keep references for swapping
+        self.splitStack = splitStack
+
+        // Put general pane into the detail container and add privacyPane as hidden child
+        detailContainer.addSubview(generalPane)
+        detailContainer.addSubview(privacyPane)
+        privacyPane.isHidden = true
+        generalPane.translatesAutoresizingMaskIntoConstraints = false
+        privacyPane.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            generalPane.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
+            generalPane.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
+            generalPane.topAnchor.constraint(equalTo: detailContainer.topAnchor),
+
+            privacyPane.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
+            privacyPane.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
+            privacyPane.topAnchor.constraint(equalTo: detailContainer.topAnchor)
+        ])
+
+        // Sidebar width
+        sidebarContainer.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        detailContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
+
+
+        // Warning under split
+        warningLabel.stringValue = "Note: Some sites may not work correctly when blocking is enabled (e.g., Slack)."
+        warningLabel.font = NSFont.systemFont(ofSize: 11)
+        warningLabel.textColor = NSColor.secondaryLabelColor
+        warningLabel.alignment = .left
+        warningLabel.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(warningLabel)
+
+        NSLayoutConstraint.activate([
+            splitStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            splitStack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            splitStack.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
+
+            tableContainer.heightAnchor.constraint(equalToConstant: 220),
+
+            warningLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            warningLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            warningLabel.topAnchor.constraint(equalTo: splitStack.bottomAnchor, constant: 12),
+            warningLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12)
+        ])
+
+        // Keep references for swapping
+        self.generalPane = generalPane
+        self.privacyPane = privacyPane
+        self.detailPane = generalPane
+
+        // default to General
+        selectPane(.general)
+
+        // local actions and references
         blockTrackers.target = self
         sendDNT.target = self
-        // remember controls for later actions
-        self.blockerRemoteURLField = remoteURL
         autoUpdate.target = self
         updateNow.target = self
+        self.blockerRemoteURLField = remoteURL
     }
 
     // MARK: - Actions
@@ -165,43 +315,94 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     @objc private func updateBlockerNow() {
         guard let urlStr = blockerRemoteURLField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), !urlStr.isEmpty, let url = URL(string: urlStr) else { return }
         UserDefaults.standard.set(urlStr, forKey: "Vaaka.BlockerRemoteURL")
+        // Update tooltip for full URL
+        blockerRemoteURLField?.toolTip = urlStr
+        remoteStatusLabel?.stringValue = "Updating…"
+        remoteStatusLabel?.textColor = NSColor.secondaryLabelColor
         ContentBlockerManager.shared.fetchRemoteRules(url: url) { success in
             DispatchQueue.main.async {
-                let alert = NSAlert()
-                alert.messageText = success ? "Block list updated" : "Failed to update block list"
-                alert.runModal()
-            }
-        }
-    }
-
-    // Allow single-click editing
-    func tableView(_ tableView: NSTableView, shouldEdit tableColumn: NSTableColumn?, row: Int) -> Bool {
-        return true
-    }
-
-    // Keep text color readable when rows are selected
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        let selected = tableView.selectedRow
-        for row in 0..<tableView.numberOfRows {
-            if let v = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) {
-                // find the text field in the view (could be the cell itself or a container)
-                if let tf = v as? NSTextField {
-                    tf.textColor = (row == selected) ? NSColor.selectedTextColor : NSColor.labelColor
+                if success {
+                    self.remoteStatusLabel?.stringValue = "Updated"
+                    self.remoteStatusLabel?.textColor = NSColor.systemGreen
                 } else {
-                    for sub in v.subviews {
-                        if let tf = sub as? NSTextField {
-                            tf.textColor = (row == selected) ? NSColor.selectedTextColor : NSColor.labelColor
-                        }
-                    }
+                    self.remoteStatusLabel?.stringValue = "Update failed"
+                    self.remoteStatusLabel?.textColor = NSColor.systemRed
+                }
+                // Clear the status after a short delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                    self.remoteStatusLabel?.stringValue = ""
                 }
             }
         }
     }
 
+    // MARK: - Settings-style sidebar helpers
+    private enum PrefPane { case general, privacy }
+
+    @objc private func sidebarTableClicked(_ sender: Any?) {
+        guard let tv = sidebarTable else { return }
+        let row = tv.selectedRow
+        if row >= 0 && row < sidebarItems.count {
+            selectPane(row == 0 ? .general : .privacy)
+        }
+    }
+
+    private func selectPane(_ pane: PrefPane) {
+        // Toggle visibility of panes and update sidebar selection
+        switch pane {
+        case .general:
+            generalPane?.isHidden = false
+            privacyPane?.isHidden = true
+            sidebarTable?.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        case .privacy:
+            generalPane?.isHidden = true
+            privacyPane?.isHidden = false
+            sidebarTable?.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        }
+        detailPane = (pane == .general) ? generalPane : privacyPane
+    }
+
+
+
+    // Allow single-click editing
+    func tableView(_ tableView: NSTableView, shouldEdit tableColumn: NSTableColumn?, row: Int) -> Bool {
+        return tableView == self.tableView
+    }
+
+    // Keep text color readable when rows are selected
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard let tv = notification.object as? NSTableView else { return }
+        if tv == self.tableView {
+            let selected = tableView.selectedRow
+            for row in 0..<tableView.numberOfRows {
+                if let v = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) {
+                    // find the text field in the view (could be the cell itself or a container)
+                    if let tf = v as? NSTextField {
+                        tf.textColor = (row == selected) ? NSColor.selectedTextColor : NSColor.labelColor
+                    } else {
+                        for sub in v.subviews {
+                            if let tf = sub as? NSTextField {
+                                tf.textColor = (row == selected) ? NSColor.selectedTextColor : NSColor.labelColor
+                            }
+                        }
+                    }
+                }
+            }
+        } else if tv == self.sidebarTable {
+            let row = sidebarTable?.selectedRow ?? -1
+            if row == 0 { selectPane(.general) } else if row == 1 { selectPane(.privacy) }
+        }
+    }
+
     // MARK: - Table
     func numberOfRows(in tableView: NSTableView) -> Int {
-        // Allow an extra blank row for inline 'Add site' edits
-        return SiteManager.shared.sites.count + 1
+        if tableView == self.tableView {
+            // Allow an extra blank row for inline 'Add site' edits
+            return SiteManager.shared.sites.count + 1
+        } else if tableView == self.sidebarTable {
+            return sidebarItems.count
+        }
+        return 0
     }
 
     // MARK: - Remote blocker helpers (fields)
@@ -288,34 +489,61 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         }
     }
 
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        guard let tf = obj.object as? NSTextField else { return }
+        // If the remote URL field is focused, expose the full URL as a tooltip and select all text for easy copying
+        if tf == blockerRemoteURLField {
+            tf.toolTip = tf.stringValue
+            tf.currentEditor()?.selectAll(nil)
+        }
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let sites = SiteManager.shared.sites
-        // If row is the trailing empty row, show placeholder for adding
-        if row >= sites.count {
-            let tf = NSTextField(string: "")
-            // No placeholder per UX request — trailing add-row is blank
-            tf.placeholderString = ""
+        if tableView == self.tableView {
+            let sites = SiteManager.shared.sites
+            // If row is the trailing empty row, show placeholder for adding
+            if row >= sites.count {
+                let tf = NSTextField(string: "")
+                tf.placeholderString = ""
+                tf.isBordered = false
+                tf.backgroundColor = .clear
+                tf.lineBreakMode = .byTruncatingTail
+                tf.isEditable = true
+                tf.delegate = self
+                tf.textColor = NSColor.labelColor
+                tf.toolTip = "Enter a domain and press Enter to add"
+                return tf
+            }
+
+            let site = sites[row]
+            // Single column table: show only the host (e.g. apple.com) to the user
+            let hostStr = site.url.host ?? site.url.absoluteString
+            let tf = NSTextField(string: hostStr)
             tf.isBordered = false
             tf.backgroundColor = .clear
             tf.lineBreakMode = .byTruncatingTail
             tf.isEditable = true
             tf.delegate = self
             tf.textColor = NSColor.labelColor
-            tf.toolTip = "Enter a domain and press Enter to add"
+            tf.toolTip = "Double-click or edit to change domain (e.g. apple.com)"
             return tf
+        } else if tableView == self.sidebarTable {
+            // Sidebar cell — use a container view to vertically center the label for HIG/accessibility
+            let title = sidebarItems[row]
+            let container = NSView()
+            container.translatesAutoresizingMaskIntoConstraints = false
+            let tf = NSTextField(labelWithString: title)
+            tf.alignment = .left
+            tf.font = NSFont.systemFont(ofSize: 14)
+            tf.backgroundColor = .clear
+            tf.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(tf)
+            NSLayoutConstraint.activate([
+                tf.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+                tf.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+            ])
+            return container
         }
-
-        let site = sites[row]
-        // Single column table: show only the host (e.g. apple.com) to the user
-        let hostStr = site.url.host ?? site.url.absoluteString
-        let tf = NSTextField(string: hostStr)
-        tf.isBordered = false
-        tf.backgroundColor = .clear
-        tf.lineBreakMode = .byTruncatingTail
-        tf.isEditable = true
-        tf.delegate = self
-        tf.textColor = NSColor.labelColor
-        tf.toolTip = "Double-click or edit to change domain (e.g. apple.com)"
-        return tf
+        return nil
     }
 }

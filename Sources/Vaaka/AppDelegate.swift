@@ -80,31 +80,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Menu actions
-    @objc func openPrivacySettings(_ sender: Any?) {
-        // Attempt to open System Settings > Privacy & Security. This URL scheme may vary by macOS version.
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy") {
-            if !NSWorkspace.shared.open(url) {
-                // fallback: open the System Settings app using the modern API
-                if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.SystemSettings") {
-                    let cfg = NSWorkspace.OpenConfiguration()
-                    NSWorkspace.shared.openApplication(at: appURL, configuration: cfg) { _, err in
-                        if let e = err { DebugLogger.warn("Failed to open System Settings via modern API: \(e)") }
-                    }
-                } else {
-                    DebugLogger.warn("Could not locate System Settings application")
-                }
-            }
-        } else {
-            if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.SystemSettings") {
-                let cfg = NSWorkspace.OpenConfiguration()
-                NSWorkspace.shared.openApplication(at: appURL, configuration: cfg) { _, err in
-                    if let e = err { DebugLogger.warn("Failed to open System Settings via modern API: \(e)") }
-                }
-            } else {
-                DebugLogger.warn("Could not locate System Settings application")
-            }
-        }
-    }
+    // (Privacy & Security system shortcut removed — this app does not expose a direct system privacy shortcut)
+
 
     @objc func openHelp(_ sender: Any?) {
         if let url = URL(string: "https://example.com/help") { NSWorkspace.shared.open(url) }
@@ -132,7 +109,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "About \(appName)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Preferences...", action: #selector(openPreferences(_:)), keyEquivalent: ",")
-        appMenu.addItem(withTitle: "Privacy & Security…", action: #selector(openPrivacySettings(_:)), keyEquivalent: "p")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
