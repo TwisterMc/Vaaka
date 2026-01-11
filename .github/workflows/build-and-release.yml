@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   build:
@@ -38,13 +38,13 @@ jobs:
           # Create a temporary directory for DMG contents
           mkdir -p dmg_staging/Vaaka
           cp -r build/Vaaka.app dmg_staging/Vaaka/
-          
+
           # Create DMG
           hdiutil create -volname "Vaaka-${{ matrix.artifact-suffix }}" \
             -srcfolder dmg_staging \
             -ov -format UDZO \
             "build/Vaaka-${{ matrix.artifact-suffix }}.dmg"
-          
+
           # Clean up
           rm -rf dmg_staging
 
