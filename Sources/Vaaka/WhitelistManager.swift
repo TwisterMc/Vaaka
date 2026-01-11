@@ -50,9 +50,7 @@ final class SiteManager {
     }
 
     private init() {
-        DebugLogger.debug("SiteManager.init start")
         loadSites()
-        DebugLogger.debug("SiteManager.init done: loaded \(sites.count) sites")
     }
 
     /// Loads sites from bundled resource `whitelist.json` if no persisted file exists, otherwise from persisted file.
@@ -154,15 +152,12 @@ final class SiteManager {
 
     /// Replace the sites array with a new ordered array and persist. (Used by Settings only.)
     func replaceSites(_ newSites: [Site]) {
-        DebugLogger.debug("SiteManager.replaceSites: replacing \(newSites.count) sites")
-
         // Deduplicate sites by canonical host, preserving first occurrence and original order.
         var seenHosts: Set<String> = []
         var uniqueSites: [Site] = []
         for site in newSites {
             if let host = SiteManager.canonicalHost(site.url.host) {
                 if seenHosts.contains(host) {
-                    DebugLogger.debug("SiteManager.replaceSites: duplicate site for host=\(host) id=\(site.id) ignored")
                     continue
                 }
                 seenHosts.insert(host)
@@ -178,7 +173,7 @@ final class SiteManager {
         if let data = try? encoder.encode(schema) {
             try? data.write(to: fileURL)
             sites = uniqueSites
-            DebugLogger.debug("SiteManager.replaceSites: final sites count=\(sites.count) list=\(sites.map { "\($0.id):\($0.url.host ?? "<no-host>")" })")
+
             // After persisting, attempt to fetch missing favicons asynchronously
             fetchMissingFaviconsIfNeeded(for: uniqueSites)
         }
@@ -190,15 +185,13 @@ final class SiteManager {
         for site in newSites where site.favicon == nil {
             guard !fetchingSiteIDs.contains(site.id) else { continue }
             fetchingSiteIDs.insert(site.id)
-            DebugLogger.debug("Fetching favicon for site id=\(site.id) host=\(site.url.host ?? "<no-host>")")
+
             FaviconFetcher.shared.fetchFavicon(for: site.url) { img in
                 defer { self.fetchingSiteIDs.remove(site.id) }
                 guard let img = img else {
-                    DebugLogger.debug("No favicon found for site id=\(site.id)")
                     return
                 }
                 if let filename = FaviconFetcher.shared.saveImage(img, forSiteID: site.id) {
-                    DebugLogger.debug("Saved favicon for site id=\(site.id) filename=\(filename)")
                     DispatchQueue.main.async {
                         var s = self.sites
                         if let idx = s.firstIndex(where: { $0.id == site.id }) {

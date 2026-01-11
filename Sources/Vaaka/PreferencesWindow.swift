@@ -72,8 +72,6 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         controls.spacing = 8
 
         // Diagnostics controls (logging level)
-        // Diagnostics controls removed — debug logging is now driven by environment variables only (disabled in code).
-
         // Hint and warning
         let hintLabel = NSTextField(labelWithString: "Enter domains like apple.com")
         hintLabel.font = NSFont.systemFont(ofSize: 11)
@@ -270,18 +268,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             warningLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12)
         ])
 
-        // DEBUG: log subview frames and hit test results to diagnose unresponsive controls
-        DebugLogger.debug("Preferences content subviews:")
-        for v in content.subviews {
-            DebugLogger.debug("  - \(type(of: v)) frame=\(v.frame) isHidden=\(v.isHidden)")
-        }
-        // Test hitTest at center and near left/right to see what view would receive clicks
-        let center = NSPoint(x: content.bounds.midX, y: content.bounds.midY)
-        if let h = content.hitTest(center) { DebugLogger.debug("hitTest center -> \(type(of: h)) frame=\(h.frame)") }
-        let left = NSPoint(x: content.bounds.minX + 40, y: content.bounds.midY)
-        if let hl = content.hitTest(left) { DebugLogger.debug("hitTest left -> \(type(of: hl)) frame=\(hl.frame)") }
-        let right = NSPoint(x: content.bounds.maxX - 40, y: content.bounds.midY)
-        if let hr = content.hitTest(right) { DebugLogger.debug("hitTest right -> \(type(of: hr)) frame=\(hr.frame)") }
+
 
         // Keep references for swapping
         self.generalPane = generalPane
