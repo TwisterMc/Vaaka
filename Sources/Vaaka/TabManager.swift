@@ -76,28 +76,7 @@ final class SiteTabManager: NSObject {
             config.defaultWebpagePreferences = webpagePreferences
 
             // Forward console.* messages from pages to the host app for debugging
-            let userContent = WKUserContentController()
-            let consoleScript = """
-            (function () {
-              function serializeArgs(args) {
-                return Array.prototype.slice.call(args).map(function (a) {
-                  try { return typeof a === 'string' ? a : JSON.stringify(a); } catch (e) { return String(a); }
-                });
-              }
-              ['log','warn','error','info'].forEach(function(level) {
-                var orig = console[level];
-                console[level] = function() {
-                  try {
-                     window.webkit.messageHandlers.vaakaConsole.postMessage({level: level, args: serializeArgs(arguments)});
-                  } catch (e) {}
-                  orig && orig.apply(console, arguments);
-                };
-              });
-            })();
-            """
-            let script = WKUserScript(source: consoleScript, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-            userContent.addUserScript(script)
-            userContent.add(ConsoleMessageHandler(siteId: site.id), name: "vaakaConsole")
+                        let userContent = WKUserContentController()
             // Error page handler receives actions from our internal error page (retry/open/dismiss)
             userContent.add(ErrorMessageHandler(siteId: site.id), name: "vaakaError")
             // Add tracker-blocking rules if the feature is enabled and compiled
@@ -231,15 +210,7 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         if let u = webView.url, let host = u.host, SiteManager.hostMatches(host: host, siteHost: site.url.host) {
             UserDefaults.standard.set(u.absoluteString, forKey: "Vaaka.LastURL.\(site.id)")
         }
-        // For diagnostics: capture the effective navigator.userAgent seen by pages so we can
-        // verify servers and scripts will see the desired Safari-like UA.
-        webView.evaluateJavaScript("navigator.userAgent") { result, error in
-            if let ua = result as? String {
-                DebugLogger.debug("navigator.userAgent: site.id=\(self.site.id) ua=\(ua)")
-            } else if let err = error {
-                DebugLogger.debug("navigator.userAgent: site.id=\(self.site.id) error=\(err)")
-            }
-        }
+        // Diagnostics removed: suppress navigator.userAgent logs in production
         // Note: theme-color is now observed via KVO on WKWebView.themeColor property
     }
 
@@ -265,24 +236,6 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         decisionHandler(.allow)
-    }
-}
-
-private final class ConsoleMessageHandler: NSObject, WKScriptMessageHandler {
-    private let siteId: String
-    init(siteId: String) {
-        self.siteId = siteId
-    }
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if message.name == "vaakaConsole" {
-            if let body = message.body as? [String: Any] {
-                let level = body["level"] as? String ?? "log"
-                let args = body["args"] as? [String] ?? []
-                print("[JS-\(level)] site.id=\(siteId) message=\(args.joined(separator: " "))")
-            } else {
-                print("[JS] site.id=\(siteId) message=\(message.body)")
-            }
-        }
     }
 }
 

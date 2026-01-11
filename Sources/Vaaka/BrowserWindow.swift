@@ -594,22 +594,17 @@ class BrowserWindowController: NSWindowController {
         // Centralized image & visibility mutators with logging
         private func applyImage(_ img: NSImage?, reason: String) {
             let beforeHas = (imageView.image != nil)
-            let beforeSize = imageView.image?.size.debugDescription ?? "nil"
             imageView.image = img
             let afterHas = (img != nil)
-            DebugLogger.debug("RailItemView.applyImage: site.id=\(site.id) reason=\(reason) beforeHas=\(beforeHas) beforeSize=\(beforeSize) afterHas=\(afterHas) afterSize=\(img?.size.debugDescription ?? "nil")")
+            // Suppress debug logs now that visuals are stable
             if beforeHas && !afterHas {
                 DebugLogger.warn("RailItemView.applyImage: site.id=\(site.id) image unexpectedly removed by reason=\(reason)")
-            }
-            if lastKnownHasImage != afterHas {
-                DebugLogger.debug("RailItemView.hasImageTransition: site.id=\(site.id) from=\(lastKnownHasImage) to=\(afterHas) reason=\(reason)")
             }
             lastKnownHasImage = afterHas
         }
         private func setImageHidden(_ hidden: Bool, reason: String) {
             let had = imageView.image != nil
             imageView.isHidden = hidden
-            DebugLogger.debug("RailItemView.setImageHidden: site.id=\(site.id) hidden=\(hidden) reason=\(reason) debug=\(debugInfo())")
             // If we have no image but are hidden==false, that's suspicious (we show nothing)
             if !hidden && !had && imageView.image == nil {
                 DebugLogger.warn("RailItemView.setImageHidden: site.id=\(site.id) making visible but no image present (possible blank rail)")
@@ -617,7 +612,6 @@ class BrowserWindowController: NSWindowController {
         }
         private func setImageAlpha(_ alpha: CGFloat, reason: String) {
             imageView.alphaValue = alpha
-            DebugLogger.debug("RailItemView.setImageAlpha: site.id=\(site.id) alpha=\(alpha) reason=\(reason) debug=\(debugInfo())")
         }
 
         private func setup() {
@@ -676,35 +670,21 @@ class BrowserWindowController: NSWindowController {
             // set tooltip
             self.toolTip = site.name
 
-            // Helpers to centralize image/visibility changes with logging
-            func applyImage(_ img: NSImage?, reason: String) {
-                let beforeHas = (imageView.image != nil)
-                let beforeSize = imageView.image?.size.debugDescription ?? "nil"
-                imageView.image = img
-                DebugLogger.debug("RailItemView.applyImage: site.id=\(site.id) reason=\(reason) beforeHas=\(beforeHas) beforeSize=\(beforeSize) afterHas=\(img != nil) afterSize=\(img?.size.debugDescription ?? "nil")")
-            }
-            func setImageHidden(_ hidden: Bool, reason: String) {
-                imageView.isHidden = hidden
-                print("[DEBUG] RailItemView.setImageHidden: site.id=\(site.id) hidden=\(hidden) reason=\(reason) debug=\(debugInfo())")
-            }
-            func setImageAlpha(_ alpha: CGFloat, reason: String) {
-                imageView.alphaValue = alpha
-                print("[DEBUG] RailItemView.setImageAlpha: site.id=\(site.id) alpha=\(alpha) reason=\(reason) debug=\(debugInfo())")
-            }
+            // Use instance methods for image/visibility updates (no noisy prints)
 
             // Load favicon (SVG preferred, PNG allowed, generated fallback)
             if let name = site.favicon, let img = FaviconFetcher.shared.image(forResource: name) {
-                applyImage(img, reason: "setup:loaded-resource:\(name)")
+                self.applyImage(img, reason: "setup:loaded-resource:\(name)")
             } else if let host = site.url.host {
                 let mono = FaviconFetcher.shared.generateMonoIcon(for: host)
-                applyImage(mono, reason: "setup:generated-mono")
+                self.applyImage(mono, reason: "setup:generated-mono")
             }
             // Ensure image view is visible and properly configured even if there was no icon
-            setImageHidden(false, reason: "setup:ensure-visible")
-            setImageAlpha(1.0, reason: "setup:ensure-alpha")
+            self.setImageHidden(false, reason: "setup:ensure-visible")
+            self.setImageAlpha(1.0, reason: "setup:ensure-alpha")
             if imageView.image == nil, let host = site.url.host {
                 // Final safety: show a generated mono icon if nothing else is present
-                applyImage(FaviconFetcher.shared.generateMonoIcon(for: host), reason: "setup:final-safety-mono-for-host:\(host)")
+                self.applyImage(FaviconFetcher.shared.generateMonoIcon(for: host), reason: "setup:final-safety-mono-for-host:\(host)")
             }
 
             // Click handling
@@ -827,11 +807,11 @@ class BrowserWindowController: NSWindowController {
                             if let name = self.site.favicon, let img = FaviconFetcher.shared.image(forResource: name) {
                                 self.applyImage(img, reason: "retry:loaded-resource:\(name):attempt:\(attempt)")
                                 self.setImageHidden(false, reason: "retry:ensure-visible")
-                                print("[DEBUG] RailItemView.retry: succeeded loading favicon for site.id=\(self.site.id) on attempt=\(attempt)")
+                                // no-op: suppress noisy retry logs
                                 // Ensure final visible state after retry succeeds
                                 self.setImageAlpha(1.0, reason: "retry:force-alpha-1")
                             } else {
-                                print("[DEBUG] RailItemView.retry: still no favicon for site.id=\(self.site.id) on attempt=\(attempt)")
+                                // suppress noisy retry logs
                             }
                         }
                     } else {

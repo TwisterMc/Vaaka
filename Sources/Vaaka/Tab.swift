@@ -153,7 +153,8 @@ final class SiteTab: NSObject {
         case .dark:
             isDarkMode = true
         case .system:
-            isDarkMode = NSAppearance.current.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            // Use effectiveAppearance instead of deprecated NSAppearance.current
+            isDarkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         }
 
         // Set the color-scheme on the document element to force dark or light mode

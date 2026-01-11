@@ -164,7 +164,7 @@ final class ContentBlockerManager {
                 urlFilter = ".*" + esc + ".*"
             } else if line.hasPrefix("|") {
                 // starts with | anchor - treat as starts-with
-                var pat = String(line.dropFirst())
+                let pat = String(line.dropFirst())
                 if pat.hasPrefix("http") {
                     let esc = NSRegularExpression.escapedPattern(for: pat)
                     urlFilter = ".*" + esc + ".*"

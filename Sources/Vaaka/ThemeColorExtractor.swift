@@ -48,13 +48,20 @@ extension NSColor {
         // Try hex format: #RGB, #RRGGBB, #RRGGBBAA
         if cleaned.hasPrefix("#") {
             let hex = String(cleaned.dropFirst())
-            var value: UInt32 = 0
-            let scanner = Scanner(string: hex)
-            if scanner.scanHexInt32(&value) && (hex.count == 6 || hex.count == 8) {
-                let r = CGFloat((value >> 16) & 0xFF) / 255.0
-                let g = CGFloat((value >> 8) & 0xFF) / 255.0
-                let b = CGFloat(value & 0xFF) / 255.0
-                self.init(red: r, green: g, blue: b, alpha: 1.0)
+            if let value = UInt64(hex, radix: 16), (hex.count == 6 || hex.count == 8) {
+                let r, g, b, a: CGFloat
+                if hex.count == 6 {
+                    r = CGFloat((value >> 16) & 0xFF) / 255.0
+                    g = CGFloat((value >> 8) & 0xFF) / 255.0
+                    b = CGFloat(value & 0xFF) / 255.0
+                    a = 1.0
+                } else { // 8 digits: RRGGBBAA
+                    r = CGFloat((value >> 24) & 0xFF) / 255.0
+                    g = CGFloat((value >> 16) & 0xFF) / 255.0
+                    b = CGFloat((value >> 8) & 0xFF) / 255.0
+                    a = CGFloat(value & 0xFF) / 255.0
+                }
+                self.init(red: r, green: g, blue: b, alpha: a)
                 return
             }
         }

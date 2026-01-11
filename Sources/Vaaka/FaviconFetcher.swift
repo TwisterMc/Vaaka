@@ -123,7 +123,9 @@ class FaviconFetcher {
                         cache.setObject(img, forKey: name as NSString)
                         return img
                     }
-                    DebugLogger.warn("image(forResource): failed to decode image at path=\(file.path) size=\(try? FileManager.default.attributesOfItem(atPath: file.path)[.size] ?? 0)")
+                    let attrs = try? FileManager.default.attributesOfItem(atPath: file.path)
+                    let size = (attrs?[.size] as? UInt64) ?? 0
+                    DebugLogger.warn("image(forResource): failed to decode image at path=\(file.path) size=\(size)")
                 }
             } catch {
                 DebugLogger.warn("image(forResource): failed to read file at path=\(file.path): \(error)")

@@ -37,11 +37,11 @@ final class AppearanceManager {
     var effectiveAppearance: NSAppearance {
         switch darkModePreference {
         case .light:
-            return NSAppearance(named: .aqua) ?? NSAppearance.current
+            return NSAppearance(named: .aqua) ?? NSApp.effectiveAppearance
         case .dark:
-            return NSAppearance(named: .darkAqua) ?? NSAppearance.current
+            return NSAppearance(named: .darkAqua) ?? NSApp.effectiveAppearance
         case .system:
-            return NSAppearance.current
+            return NSApp.effectiveAppearance
         }
     }
 
@@ -54,7 +54,7 @@ final class AppearanceManager {
             return "(prefers-color-scheme: dark)"
         case .system:
             // Use the current system setting
-            let isDark = NSAppearance.current.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             return isDark ? "(prefers-color-scheme: dark)" : "(prefers-color-scheme: light)"
         }
     }
