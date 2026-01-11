@@ -658,7 +658,7 @@ class BrowserWindowController: NSWindowController {
                 indicator.topAnchor.constraint(equalTo: topAnchor, constant: 6),
                 indicator.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
 
-                imageView.centerXAnchor.constraint(equalTo: centerXAnchor, constant: 4),
+                imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
                 imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
                 imageView.widthAnchor.constraint(equalToConstant: 24),
                 imageView.heightAnchor.constraint(equalToConstant: 24),
