@@ -43,6 +43,7 @@ class BrowserWindowController: NSWindowController {
         // Also react to site list changes
         NotificationCenter.default.addObserver(self, selector: #selector(sitesChanged), name: .SitesChanged, object: nil)
 
+
         // Window delegate
         self.window?.delegate = self
 
@@ -182,6 +183,7 @@ class BrowserWindowController: NSWindowController {
             let idx = SiteTabManager.shared.activeIndex
             self.updateRailSelection(activeIndex: idx)
             self.setActiveWebViewVisibility(index: idx)
+            self.updateWindowTitleForActiveTab()
         }
     }
 
@@ -236,6 +238,21 @@ class BrowserWindowController: NSWindowController {
         }
     }
 
+    private func updateWindowTitleForActiveTab() {
+        guard let win = self.window else { return }
+        if let tab = SiteTabManager.shared.activeTab() {
+            let t = tab.webView.title
+            if let title = t, !title.isEmpty {
+                win.title = title
+            } else {
+                // Fallback to site name when no page title available
+                win.title = tab.site.name
+            }
+        } else {
+            win.title = "Vaaka"
+        }
+    }
+
     private func updateEmptyStateIfNeeded() {
         // Remove any previous empty state view
         if SiteManager.shared.sites.isEmpty {
@@ -274,6 +291,10 @@ class BrowserWindowController: NSWindowController {
         guard let id = note.object as? String else { return }
         for case let item as RailItemView in railStackView.arrangedSubviews where item.site.id == id {
             item.setLoading(false)
+        }
+        // If the finished site is the active tab, update window title
+        if let active = SiteTabManager.shared.activeTab(), active.site.id == id {
+            updateWindowTitleForActiveTab()
         }
     }
 
@@ -314,6 +335,8 @@ class BrowserWindowController: NSWindowController {
             }
         }
     }
+
+    
 
     // MARK: - Keyboard handling
     private func handleKeyEvent(_ evt: NSEvent) -> NSEvent? {

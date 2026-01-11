@@ -97,6 +97,7 @@ final class SiteTab: NSObject {
 
         // Do not load the start URL immediately — wait until the WebView is attached to the window/content view.
         // This avoids spurious `open` attempts while the WebView is not yet part of the responder/window chain.
+
     }
 
     deinit {

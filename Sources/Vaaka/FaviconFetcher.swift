@@ -6,6 +6,7 @@ class FaviconFetcher {
     static let shared = FaviconFetcher()
 
     private let session: URLSession
+    private let cache = NSCache<NSString, NSImage>()
 
     init(session: URLSession = URLSession(configuration: .ephemeral)) {
         self.session = session
@@ -101,22 +102,25 @@ class FaviconFetcher {
 
     // Load a bundled or cached resource image by resource name (e.g., "github.svg" or "site.png").
     func image(forResource name: String) -> NSImage? {
+        if let cached = cache.object(forKey: name as NSString) { return cached }
         // Try asset in app bundle first
-        if let img = NSImage(named: NSImage.Name(name)) { return img }
+        if let img = NSImage(named: NSImage.Name(name)) { cache.setObject(img, forKey: name as NSString); return img }
         // Fallback to looking in module resources
-        if let url = Bundle.module.url(forResource: name, withExtension: nil), let data = try? Data(contentsOf: url), let img = NSImage(data: data) { return img }
+        if let url = Bundle.module.url(forResource: name, withExtension: nil), let data = try? Data(contentsOf: url), let img = NSImage(data: data) { cache.setObject(img, forKey: name as NSString); return img }
         // Finally, check on-disk saved favicons
         let file = faviconsDir.appendingPathComponent(name)
         if FileManager.default.fileExists(atPath: file.path) {
             do {
                 let data = try Data(contentsOf: file)
                 if let img = NSImage(data: data) {
+                    cache.setObject(img, forKey: name as NSString)
                     return img
                 } else {
                     // Try a more robust decode via ImageIO
                     if let src = CGImageSourceCreateWithData(data as CFData, nil), let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) {
                         let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
                         DebugLogger.debug("image(forResource): fallback CGImage decode succeeded for \(file.path) size=\(data.count)")
+                        cache.setObject(img, forKey: name as NSString)
                         return img
                     }
                     DebugLogger.warn("image(forResource): failed to decode image at path=\(file.path) size=\(try? FileManager.default.attributesOfItem(atPath: file.path)[.size] ?? 0)")
@@ -158,6 +162,10 @@ class FaviconFetcher {
             // Log size
             let size = (try? FileManager.default.attributesOfItem(atPath: final.path)[.size]) as? UInt64 ?? 0
             print("[DEBUG] saveImage: wrote favicon for site=\(siteID) path=\(final.path) size=\(size)")
+            // Update cache with the newly saved image
+            if let savedImage = NSImage(data: data) {
+                cache.setObject(savedImage, forKey: fname as NSString)
+            }
             return fname
         } catch {
             print("[DEBUG] Failed to save favicon for \(siteID): \(error)")
