@@ -12,7 +12,6 @@ final class AppearanceManager {
     }
 
     private let darkModeKey = "Vaaka.DarkModePreference"
-    private let themeColorKey = "Vaaka.UseThemeColor"
 
     var darkModePreference: DarkModePreference {
         get {
@@ -21,14 +20,6 @@ final class AppearanceManager {
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: darkModeKey)
-            NotificationCenter.default.post(name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
-        }
-    }
-
-    var useThemeColor: Bool {
-        get { UserDefaults.standard.bool(forKey: themeColorKey) }
-        set {
-            UserDefaults.standard.set(newValue, forKey: themeColorKey)
             NotificationCenter.default.post(name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
         }
     }

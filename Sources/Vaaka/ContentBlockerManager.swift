@@ -39,14 +39,11 @@ final class ContentBlockerManager {
         // Load any locally persisted rules (from remote updates) preferentially
         if let local = loadPersistedRules() {
             WKContentRuleListStore.default().compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: local) { [weak self] (list, error) in
-                if let err = error {
-                    DebugLogger.warn("ContentBlocker compile from persisted rules failed: \(err) — falling back to builtin rules")
-                    // Fall back to builtin rules
+                if error != nil {
                     self?.compileBuiltin()
                     return
                 }
                 guard let l = list else { self?.compileBuiltin(); return }
-                DebugLogger.info("ContentBlocker compiled from persisted rules")
                 self?.compiled = l
                 DispatchQueue.main.async { self?.applyToExistingTabs(l) }
             }
@@ -58,12 +55,7 @@ final class ContentBlockerManager {
     private func compileBuiltin() {
         let rules = defaultRulesJSON()
         WKContentRuleListStore.default().compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: rules) { [weak self] (list, error) in
-            if let err = error {
-                DebugLogger.warn("ContentBlocker compile failed: \(err)")
-                return
-            }
             guard let l = list else { return }
-            DebugLogger.info("ContentBlocker compiled: id=\(self?.identifier ?? "<id>") (built-in)")
             self?.compiled = l
             DispatchQueue.main.async { self?.applyToExistingTabs(l) }
         }
@@ -93,13 +85,9 @@ final class ContentBlockerManager {
     func fetchRemoteRules(url: URL, completion: @escaping (Bool) -> Void) {
         let req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
         let t = URLSession.shared.dataTask(with: req) { data, resp, err in
-            if let e = err { DebugLogger.warn("ContentBlocker remote fetch failed: \(e)"); completion(false); return }
-            guard let d = data, let s = String(data: d, encoding: .utf8) else { DebugLogger.warn("ContentBlocker remote fetch: invalid data"); completion(false); return }
-            // Basic validation: must decode as JSON array and contain objects with trigger/action
-            if (try? JSONSerialization.jsonObject(with: d)) == nil {
-                DebugLogger.warn("ContentBlocker remote fetch: JSON validation failed")
-                completion(false); return
-            }
+            guard err == nil else { completion(false); return }
+            guard let d = data, let s = String(data: d, encoding: .utf8) else { completion(false); return }
+            guard (try? JSONSerialization.jsonObject(with: d)) != nil else { completion(false); return }
             // Persist the fetched rules and schedule compile
             if self.persistRules(s) {
                 DispatchQueue.main.async { self.compiled = nil; self.compileIfNeeded(); completion(true) }
@@ -113,10 +101,10 @@ final class ContentBlockerManager {
     func fetchAndConvertEasyList(from url: URL, completion: @escaping (Bool) -> Void) {
         let req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
         let t = URLSession.shared.dataTask(with: req) { data, resp, err in
-            if let e = err { DebugLogger.warn("EasyList fetch failed: \(e)"); completion(false); return }
-            guard let d = data, let s = String(data: d, encoding: .utf8) else { DebugLogger.warn("EasyList fetch: invalid data"); completion(false); return }
+            guard err == nil else { completion(false); return }
+            guard let d = data, let s = String(data: d, encoding: .utf8) else { completion(false); return }
             let json = self.convertABPToContentRules(abp: s)
-            guard json.count > 0 else { DebugLogger.warn("EasyList conversion produced empty rules"); completion(false); return }
+            guard json.count > 0 else { completion(false); return }
             if self.persistRules(json) {
                 // record last-updated
                 self.updateLastUpdated(Date())
@@ -203,7 +191,7 @@ final class ContentBlockerManager {
 
     private func persistRules(_ rules: String) -> Bool {
         guard let url = persistURLForRules() else { return false }
-        do { try rules.write(to: url, atomically: true, encoding: .utf8); return true } catch { DebugLogger.warn("Failed to persist blocker rules: \(error)"); return false }
+        do { try rules.write(to: url, atomically: true, encoding: .utf8); return true } catch { return false }
     }
 
     private func loadPersistedRules() -> String? {

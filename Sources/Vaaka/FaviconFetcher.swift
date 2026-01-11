@@ -119,16 +119,12 @@ class FaviconFetcher {
                     // Try a more robust decode via ImageIO
                     if let src = CGImageSourceCreateWithData(data as CFData, nil), let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) {
                         let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
-                        DebugLogger.debug("image(forResource): fallback CGImage decode succeeded for \(file.path) size=\(data.count)")
                         cache.setObject(img, forKey: name as NSString)
                         return img
                     }
-                    let attrs = try? FileManager.default.attributesOfItem(atPath: file.path)
-                    let size = (attrs?[.size] as? UInt64) ?? 0
-                    DebugLogger.warn("image(forResource): failed to decode image at path=\(file.path) size=\(size)")
                 }
             } catch {
-                DebugLogger.warn("image(forResource): failed to read file at path=\(file.path): \(error)")
+                // Failed to read file
             }
         }
         return nil
@@ -141,7 +137,7 @@ class FaviconFetcher {
     }
     /// Save an image for a given site ID to the favicons directory and return its filename (e.g., "<siteid>.png")
     func saveImage(_ image: NSImage, forSiteID siteID: String) -> String? {
-        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let data = rep.representation(using: .png, properties: [:]) else { DebugLogger.warn("saveImage: unable to convert image to PNG for site=\(siteID)"); return nil }
+        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let data = rep.representation(using: .png, properties: [:]) else { return nil }
         let fname = "\(siteID).png"
         let final = faviconsDir.appendingPathComponent(fname)
         let temp = faviconsDir.appendingPathComponent("\(fname).tmp")
@@ -155,7 +151,6 @@ class FaviconFetcher {
                     // ok
                 } else {
                     try? FileManager.default.removeItem(at: temp)
-                    DebugLogger.warn("saveImage: decoded image check failed for site=\(siteID)")
                     return nil
                 }
             }
@@ -179,7 +174,6 @@ class FaviconFetcher {
     func generateMonoIcon(for host: String) -> NSImage? {
         let canonical = SiteManager.canonicalHost(host) ?? host.lowercased()
         let letter = canonical.first.map { String($0).uppercased() } ?? "?"
-        DebugLogger.debug("generateMonoIcon: host=\(host) canonical=\(canonical) letter=\(letter)")
         let size = NSSize(width: 28, height: 28)
         let img = NSImage(size: size)
         img.lockFocus()

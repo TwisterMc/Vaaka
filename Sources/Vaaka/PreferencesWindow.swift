@@ -193,8 +193,6 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         importEasy.setContentHuggingPriority(.required, for: .horizontal)
         // Keep references
         self.remoteStatusLabel = statusLabel
-        // add import button to view hierarchy later (used in layout)
-        self.importEasyButton = importEasy
         self.lastUpdatedLabel = lastUpdatedLabel
 
         // remove deprecated fields
@@ -256,12 +254,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         darkModeRow.alignment = .centerY
         darkModeLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        // Theme color control
-        let useThemeColor = NSButton(checkboxWithTitle: "Use site color", target: self, action: #selector(toggleUseThemeColor(_:)))
-        useThemeColor.state = AppearanceManager.shared.useThemeColor ? .on : .off
-        useThemeColor.toolTip = "Tint the window and sidebar with the site’s color (from favicon)"
-
-        let appearanceStack = NSStackView(views: [appearanceHeader, darkModeRow, useThemeColor])
+        let appearanceStack = NSStackView(views: [appearanceHeader, darkModeRow])
         appearanceStack.orientation = .vertical
         appearanceStack.alignment = .leading
         appearanceStack.spacing = 10
@@ -330,9 +323,6 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         self.privacyPane = privacyPane
         self.detailPane = generalPane
 
-        // default to General
-        selectPane(.general)
-
         // local actions and references
         blockTrackers.target = self
         sendDNT.target = self
@@ -393,13 +383,6 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         }
         AppearanceManager.shared.darkModePreference = preference
     }
-
-    @objc private func toggleUseThemeColor(_ sender: NSButton) {
-        let on = sender.state == .on
-        AppearanceManager.shared.useThemeColor = on
-    }
-
-
 
     @objc private func updateBlockerNow() {
         guard let urlStr = blockerRemoteURLField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), !urlStr.isEmpty, let url = URL(string: urlStr) else { return }

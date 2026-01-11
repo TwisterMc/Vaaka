@@ -64,26 +64,22 @@ final class SiteManager {
                 let schema = try decoder.decode(FileSchema.self, from: data)
                 sites = schema.sites
             } catch {
-                DebugLogger.warn("Failed to load persisted whitelist: \(error) — falling back to empty sites")
                 sites = []
             }
         } else {
             do {
-                guard let bundled = Bundle.module.url(forResource: "whitelist", withExtension: "json") else { DebugLogger.warn("No bundled whitelist.json"); sites = []; return }
+                guard let bundled = Bundle.module.url(forResource: "whitelist", withExtension: "json") else { sites = []; return }
                 let data = try Data(contentsOf: bundled)
                 let schema = try decoder.decode(FileSchema.self, from: data)
                 sites = schema.sites
                 // Persist the bundled version for future launches
                 try? data.write(to: fileURL)
             } catch {
-                DebugLogger.warn("Failed to load bundled whitelist: \(error) — falling back to empty sites")
                 sites = []
             }
         }
 
-        // If after loading there are no sites configured, seed a sensible default so users have an immediate starter site.
         if sites.isEmpty {
-            DebugLogger.info("No sites configured; seeding default site: apple.com")
             if let appleURL = URL(string: "https://apple.com") {
                 let s = Site(id: "apple-default", name: "Apple", url: appleURL, favicon: nil)
                 sites = [s]
@@ -203,8 +199,6 @@ final class SiteManager {
                             }
                         }
                     }
-                } else {
-                    DebugLogger.warn("Failed to save favicon image for site id=\(site.id)")
                 }
             }
         }

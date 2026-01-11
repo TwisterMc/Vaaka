@@ -156,7 +156,6 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         // Allow in-page navigation and navigations that remain within the owning site's domain (subdomains allowed).
         // Use hostMatches directly to avoid relying on Site (value) equality which may be brittle across reloads.
         if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
-            DebugLogger.debug("Allowing same-site navigation for site.id=\(site.id) urlHost=\(urlHost)")
             return decisionHandler(.allow)
         }
 
@@ -164,22 +163,17 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         if navigationAction.navigationType == .linkActivated {
             let abs = url.absoluteString
             if let sch = url.scheme?.lowercased(), sch == "data" || sch == "blob" || sch == "about" || abs.hasPrefix("about:") {
-                // treat as internal — allow quietly
-                DebugLogger.debug("Ignoring internal navigation attempt to \(url)")
                 return decisionHandler(.allow)
             }
 
             // If the link looks like an SSO/IdP target, open externally by default to avoid embedded-browser failures.
             let isSSO = SSODetector.isSSO(url)
-            DebugLogger.debug("linkActivated: site.id=\(site.id) url=\(url) isSSO=\(isSSO) siteHost=\(site.url.host ?? "<no-host>") matchedSite=\(SiteManager.shared.site(for: url)?.id ?? "<none>")")
             if isSSO {
-                DebugLogger.info("Detected SSO/IdP target -> opening externally: \(url)")
                 Telemetry.shared.recordExternalOpen(siteId: site.id, url: url)
                 NSWorkspace.shared.open(url)
                 return decisionHandler(.cancel)
             }
 
-            DebugLogger.info("User clicked external link -> opening in default browser: \(url)")
             Telemetry.shared.recordExternalOpen(siteId: site.id, url: url)
             NSWorkspace.shared.open(url)
             return decisionHandler(.cancel)
@@ -191,7 +185,6 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
 
     // Notify BrowserWindow about start/finish to allow UI updates (loading indicators)
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        DebugLogger.debug("navigation: didStartProvisionalNavigation for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") hidden=\(webView.isHidden) navigationNonNil=\(navigation != nil)")
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: site.id)
         // Telemetry: record navigation start
         Telemetry.shared.recordNavigationStart(siteId: site.id, url: webView.url)
@@ -199,10 +192,6 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Avoid noisy debug logs for hidden/offscreen webviews (e.g., background tabs)
-        if !webView.isHidden {
-            DebugLogger.debug("navigation: didFinish for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") hidden=\(webView.isHidden)")
-        }
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
         // Telemetry: record navigation finish
         Telemetry.shared.recordNavigationFinish(siteId: site.id, url: webView.url)
@@ -295,10 +284,8 @@ private final class SelfUIDelegate: NSObject, WKUIDelegate {
         // Open external URLs in default browser and do not create new WebViews
         let abs = url.absoluteString
         if let sch = url.scheme?.lowercased(), sch == "data" || sch == "blob" || sch == "about" || abs.hasPrefix("about:") {
-            DebugLogger.debug("Ignoring internal createWebView request for \(url)")
             return nil
         }
-        DebugLogger.debug("Opening external URL from UI delegate: \(url)")
         NSWorkspace.shared.open(url)
         return nil
     }

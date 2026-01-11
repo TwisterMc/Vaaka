@@ -3,7 +3,7 @@ import WebKit
 
 class BrowserWindowController: NSWindowController {
     // UI – vertical tab rail on the left + content on the right
-    private let railContainer: NSView = NSView()
+    private let railContainer: NSVisualEffectView = NSVisualEffectView()
     private let railScrollView: NSScrollView = NSScrollView()
     private let railStackView: NSStackView = NSStackView()
 
@@ -81,10 +81,11 @@ class BrowserWindowController: NSWindowController {
         guard let content = window?.contentView else { return }
         content.subviews.forEach { $0.removeFromSuperview() }
 
-        // Rail container
+        // Rail container with native sidebar appearance
         railContainer.translatesAutoresizingMaskIntoConstraints = false
-        railContainer.wantsLayer = true
-        // Initial colors will be set by applyAppearance() after init
+        railContainer.material = .sidebar
+        railContainer.blendingMode = .behindWindow
+        railContainer.state = .active
         
         // Scroll view for rail
         railScrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -160,10 +161,6 @@ class BrowserWindowController: NSWindowController {
 
     // MARK: - UI updates
     @objc private func sitesChanged() {
-        // Diagnostic: log content container subviews before change
-        let beforeSubviews = contentContainer.subviews.count
-        DebugLogger.debug("sitesChanged: contentContainer.subviews before=\(beforeSubviews) webViewsAttached=\(webViewsAttached)")
-
         rebuildRailButtons()
         attachAllWebViewsIfNeeded()
 
@@ -195,13 +192,6 @@ class BrowserWindowController: NSWindowController {
             self.updateRailSelection(activeIndex: idx)
             self.setActiveWebViewVisibility(index: idx)
             self.updateWindowTitleForActiveTab()
-            // Apply favicon-derived color for the newly active tab if enabled
-            if AppearanceManager.shared.useThemeColor, let active = SiteTabManager.shared.activeTab() {
-                let color = FaviconColorExtractor.shared.cachedColor(forSiteID: active.site.id) ?? FaviconColorExtractor.shared.computeAndCacheColor(for: active.site)
-                if let c = color { self.applyThemeColorToWindow(c) } else { self.resetThemeColor() }
-            } else if !AppearanceManager.shared.useThemeColor {
-                self.resetThemeColor()
-            }
         }
     }
 
@@ -273,77 +263,18 @@ class BrowserWindowController: NSWindowController {
         }
     }
 
-    private func applyThemeColorToWindow(_ color: NSColor) {
-        guard let win = self.window else { return }
-        
-        // Set window background color - this colors the title bar
-        win.backgroundColor = color.withAlphaComponent(1.0)
-        
-        // Apply the theme color to the sidebar
-        railContainer.wantsLayer = true
-        railContainer.layer?.backgroundColor = color.withAlphaComponent(1.0).cgColor
-        railContainer.layer?.borderWidth = 0.0
-        
-        // Subtle tint for content area
-        contentContainer.layer?.backgroundColor = color.withAlphaComponent(0.05).cgColor
-    }
-
     @objc private func appearanceChanged() {
-        // Apply the user's appearance preference first
         applyAppearance()
-        
-        // Then apply theme-color if enabled, which will override the background color
-        if AppearanceManager.shared.useThemeColor, let active = SiteTabManager.shared.activeTab() {
-            let color = FaviconColorExtractor.shared.cachedColor(forSiteID: active.site.id) ?? FaviconColorExtractor.shared.computeAndCacheColor(for: active.site)
-            if let c = color { applyThemeColorToWindow(c) } else { resetThemeColor() }
-        } else {
-            resetThemeColor()
-        }
-    }
-
-    // Using favicon dominant color; no WKWebView.themeColor KVO needed
-
-    private func resetThemeColor() {
-        guard let win = self.window else { return }
-        
-        // Reset window background to clear (let appearance control it)
-        win.backgroundColor = .clear
-        
-        // Reset sidebar - use properly resolved colors for current appearance
-        updateSidebarAppearance()
-        
-        // Reset content - resolve to current appearance
-        let effectiveAppearance = win.effectiveAppearance
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            contentContainer.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        }
-    }
-    
-    private func updateSidebarAppearance() {
-        // This method updates the sidebar color based on current effective appearance
-        // Called when appearance changes and when resetting theme-color
-        
-        // Resolve NSColor to the current appearance's actual color
-        if let effectiveAppearance = window?.effectiveAppearance {
-            effectiveAppearance.performAsCurrentDrawingAppearance {
-                railContainer.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-                railContainer.layer?.borderColor = NSColor.separatorColor.cgColor
-                railContainer.layer?.borderWidth = 1.0
-            }
-        }
     }
 
     private func applyAppearance() {
         guard let win = self.window else { return }
         win.appearance = AppearanceManager.shared.effectiveAppearance
+        win.backgroundColor = .clear
         
-        // Update sidebar colors to match new appearance (unless favicon-derived color is active)
-        let hasThemeColor = AppearanceManager.shared.useThemeColor &&
-            (SiteTabManager.shared.activeTab().map { FaviconColorExtractor.shared.cachedColor(forSiteID: $0.site.id) != nil } ?? false)
-        
-        if !hasThemeColor {
-            updateSidebarAppearance()
-        }
+        // Sidebar uses native material
+        railContainer.material = .sidebar
+        railContainer.layer?.backgroundColor = nil
         
         // Update content container background for current appearance
         let effectiveAppearance = win.effectiveAppearance
@@ -391,13 +322,9 @@ class BrowserWindowController: NSWindowController {
         for case let item as RailItemView in railStackView.arrangedSubviews where item.site.id == id {
             item.setLoading(false)
         }
-        // If the finished site is the active tab, update window title and apply favicon-derived color
+        // If the finished site is the active tab, update window title
         if let active = SiteTabManager.shared.activeTab(), active.site.id == id {
             updateWindowTitleForActiveTab()
-            if AppearanceManager.shared.useThemeColor {
-                let color = FaviconColorExtractor.shared.cachedColor(forSiteID: id) ?? FaviconColorExtractor.shared.computeAndCacheColor(for: active.site)
-                if let c = color { applyThemeColorToWindow(c) }
-            }
         }
     }
 
@@ -591,24 +518,13 @@ class BrowserWindowController: NSWindowController {
         // Track the last known image presence to detect unexpected transitions
         private var lastKnownHasImage = false
 
-        // Centralized image & visibility mutators with logging
+        // Centralized image & visibility mutators
         private func applyImage(_ img: NSImage?, reason: String) {
-            let beforeHas = (imageView.image != nil)
             imageView.image = img
-            let afterHas = (img != nil)
-            // Suppress debug logs now that visuals are stable
-            if beforeHas && !afterHas {
-                DebugLogger.warn("RailItemView.applyImage: site.id=\(site.id) image unexpectedly removed by reason=\(reason)")
-            }
-            lastKnownHasImage = afterHas
+            lastKnownHasImage = (img != nil)
         }
         private func setImageHidden(_ hidden: Bool, reason: String) {
-            let had = imageView.image != nil
             imageView.isHidden = hidden
-            // If we have no image but are hidden==false, that's suspicious (we show nothing)
-            if !hidden && !had && imageView.image == nil {
-                DebugLogger.warn("RailItemView.setImageHidden: site.id=\(site.id) making visible but no image present (possible blank rail)")
-            }
         }
         private func setImageAlpha(_ alpha: CGFloat, reason: String) {
             imageView.alphaValue = alpha
@@ -737,7 +653,6 @@ class BrowserWindowController: NSWindowController {
                     spinner.animator().alphaValue = 1.0
                 }, completionHandler: {
                     self.setImageHidden(true, reason: "setLoading:start:anim-complete")
-                    DebugLogger.debug("RailItemView.setLoading(start) completed: site.id=\(self.site.id) image=nil?=\(self.imageView.image == nil)")
                 })
 
                 // Schedule a fallback in case loading stalls: show a mono icon and stop spinner after a short timeout
@@ -751,7 +666,6 @@ class BrowserWindowController: NSWindowController {
                             self.setImageAlpha(1.0, reason: "loadingTimeout:set-alpha-1")
                             self.spinner.stopAnimation(nil)
                             self.spinner.isHidden = true
-                            DebugLogger.debug("RailItemView.loadingTimeout: applied fallback mono icon for site.id=\(self.site.id) host=\(host)")
                         }
                     }
                 }
@@ -778,7 +692,6 @@ class BrowserWindowController: NSWindowController {
                 }, completionHandler: {
                     self.spinner.stopAnimation(nil)
                     self.spinner.isHidden = true
-                    DebugLogger.debug("RailItemView.setLoading(finish) completed: site.id=\(self.site.id) image=nil?=\(self.imageView.image == nil) size=\(self.imageView.image?.size.debugDescription ?? "nil")")
 
                     // Ensure any pending loading-timeout fallback is cancelled now that finish completed
                     self.loadingTimeoutWorkItem?.cancel()
@@ -790,7 +703,6 @@ class BrowserWindowController: NSWindowController {
                             self.applyImage(FaviconFetcher.shared.generateMonoIcon(for: host), reason: "setLoading:immediate-fallback-mono-for:\(host)")
                             self.setImageHidden(false, reason: "setLoading:immediate-fallback-ensure-visible")
                             self.setImageAlpha(1.0, reason: "setLoading:immediate-fallback-alpha-1")
-                            DebugLogger.debug("RailItemView.setLoading: immediate fallback mono icon applied for site.id=\(self.site.id) host=\(host)")
                         }
                     }
 
@@ -802,7 +714,6 @@ class BrowserWindowController: NSWindowController {
                     if self.imageView.image == nil, self.reloadRetries < 3 {
                         self.reloadRetries += 1
                         let attempt = self.reloadRetries
-                        DebugLogger.debug("RailItemView.setLoading: scheduling retry \(attempt) for site.id=\(self.site.id)")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
                             if let name = self.site.favicon, let img = FaviconFetcher.shared.image(forResource: name) {
                                 self.applyImage(img, reason: "retry:loaded-resource:\(name):attempt:\(attempt)")

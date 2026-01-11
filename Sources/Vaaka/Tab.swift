@@ -48,7 +48,6 @@ final class SiteTab: NSObject {
             let wi = DispatchWorkItem { [weak self] in
                 guard let self = self else { return }
                 if self.navigationInProgress {
-                    DebugLogger.warn("SiteTab.navigation stuck watchdog fired: site.id=\(self.site.id) url=\(self.site.url.absoluteString) — attempting in-app recovery")
                     DispatchQueue.main.async {
                         // Try to recover by activating the tab (makes WebView visible) and reloading once.
                         if let idx = SiteTabManager.shared.tabs.firstIndex(where: { $0.site.id == self.site.id }) {

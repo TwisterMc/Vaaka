@@ -18,9 +18,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         windowController?.window?.makeKeyAndOrderFront(nil)
 
-        print("[DEBUG] Vaaka launched: window frame=\(windowController?.window?.frame ?? .zero)")
-        vaakaLog("Launched; window frame=\(windowController?.window?.frame ?? .zero)")
-
         // Create a minimal app menu so standard actions are available
         createMainMenu()
     }
@@ -63,7 +60,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if rect.size.width < minW { rect.size.width = minW }
             if rect.size.height < minH { rect.size.height = minH }
             wc.window?.setFrame(rect, display: false)
-            vaakaLog("Restored window frame (clamped if needed)=\(rect)")
         }
 
         // SiteTabManager already restores site tabs and active site

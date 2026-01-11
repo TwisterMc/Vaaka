@@ -39,12 +39,6 @@ struct SSODetector {
             }
         }
 
-        // Path heuristics
-        let path = url.path.lowercased()
-        if path.contains("/saml") || path.contains("/oauth") || path.contains("/auth") || path.contains("/signin") || path.contains("/login") {
-            return true
-        }
-
         return false
     }
 }
