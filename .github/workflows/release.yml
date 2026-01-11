@@ -1,0 +1,130 @@
+name: Build & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0). If omitted uses auto-{run_id}"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build per-arch
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            os: macos-15
+          - arch: x86_64
+            os: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check runner architecture
+        id: check
+        run: |
+          if [ "$(uname -m)" != "${{ matrix.arch }}" ]; then
+            echo "skipping=true" >> $GITHUB_OUTPUT
+            echo "Skipping: wanted ${{ matrix.arch }} but got $(uname -m)"
+          else
+            echo "skipping=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Cache Swift build artifacts
+        if: steps.check.outputs.skipping == 'false'
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-${{ matrix.arch }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.arch }}-spm-
+
+      - name: Install Swift
+        if: steps.check.outputs.skipping == 'false'
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+
+      - name: Run tests
+        if: steps.check.outputs.skipping == 'false'
+        run: swift test
+
+      - name: Build (release)
+        if: steps.check.outputs.skipping == 'false'
+        run: swift build -c release -Xswiftc -O -Xswiftc -whole-module-optimization
+
+      - name: Package app bundle
+        if: steps.check.outputs.skipping == 'false'
+        run: |
+          set -euo pipefail
+          BUILD_DIR=".build/release"
+          OUT_APP="./build/Vaaka.app"
+
+          rm -rf "$OUT_APP"
+          mkdir -p "$OUT_APP/Contents/MacOS"
+          mkdir -p "$OUT_APP/Contents/Resources"
+
+          # Copy binary
+          cp "$BUILD_DIR/Vaaka" "$OUT_APP/Contents/MacOS/Vaaka"
+          chmod +x "$OUT_APP/Contents/MacOS/Vaaka"
+
+          # Copy Info.plist and resources
+          cp Resources/Info.plist "$OUT_APP/Contents/Info.plist"
+          cp -R Resources/ "$OUT_APP/Contents/Resources/"
+
+          echo "✓ Packaged: $OUT_APP"
+
+      - name: Create distribution zip
+        if: steps.check.outputs.skipping == 'false'
+        run: |
+          mkdir -p ./artifacts
+          ditto -c -k --sequesterRsrc --keepParent ./build/Vaaka.app "./artifacts/Vaaka-${{ matrix.arch }}.zip"
+          ls -lh "./artifacts/Vaaka-${{ matrix.arch }}.zip"
+
+      - name: Upload artifact
+        if: steps.check.outputs.skipping == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vaaka-${{ matrix.arch }}
+          path: ./artifacts/Vaaka-${{ matrix.arch }}.zip
+
+  release:
+    name: Draft GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=auto-${{ github.run_id }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Draft Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "Vaaka ${{ steps.tag.outputs.tag }}"
+          body: "Build artifacts for ${{ steps.tag.outputs.tag }}"
+          draft: true
+          prerelease: true
+          files: artifacts/*/Vaaka-*.zip
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

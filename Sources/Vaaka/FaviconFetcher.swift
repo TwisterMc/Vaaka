@@ -92,7 +92,7 @@ class FaviconFetcher {
     }
 
     // Directory where saved favicons are stored (Application Support/Vaaka/favicons)
-    private var faviconsDir: URL {
+    internal var faviconsDir: URL {
         let fm = FileManager.default
         let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory
         let d = appSupport.appendingPathComponent("Vaaka/favicons", isDirectory: true)

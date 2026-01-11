@@ -2,57 +2,36 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [main]
   pull_request:
-    branches:
-      - main
-      - develop
+    branches: [main]
 
 jobs:
-  test:
-    name: Test on ${{ matrix.runner }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        runner:
-          - macos-15
-          - macos-15-intel
+  build-and-test:
+    runs-on: macos-15
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Swift
+      - name: Cache Swift build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Install Swift
         uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
 
-      - name: Run tests
-        run: swift test -v
+      - name: Build (debug)
+        run: swift build
 
-  build:
-    name: Build on ${{ matrix.runner }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        runner:
-          - macos-15
-          - macos-15-intel
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Test
+        run: swift test
 
-      - name: Set up Swift
-        uses: swift-actions/setup-swift@v2
-
-      - name: Build app (debug)
-        run: swift build -v
-
-      - name: Package app
-        run: bash scripts/package_app.sh
-
-      - name: Verify app structure
-        run: |
-          test -d build/Vaaka.app/Contents/MacOS || (echo "MacOS directory not found" && exit 1)
-          test -f build/Vaaka.app/Contents/Info.plist || (echo "Info.plist not found" && exit 1)
-          test -f build/Vaaka.app/Contents/Resources/whitelist.json || (echo "whitelist.json not found" && exit 1)
-          echo "✓ App structure is valid"
+      - name: Build (release)
+        run: swift build -c release

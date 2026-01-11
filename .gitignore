@@ -3,16 +3,23 @@
 .AppleDouble
 .LSOverride
 
-# Swift
+# Swift Package Manager
 .build/
+.swiftpm/
 
 # Xcode
 *.xcworkspace
 *.xcuserstate
-*.xcuserdata/
+**/xcuserdata/
 DerivedData/
 Build/
+build/
 *.xcarchive
+
+# Temporary files
+*.swp
+*~
+.#*
 
 # Generated files
 .vscode/
