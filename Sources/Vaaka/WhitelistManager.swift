@@ -68,7 +68,14 @@ final class SiteManager {
             }
         } else {
             do {
-                guard let bundled = Bundle.module.url(forResource: "whitelist", withExtension: "json") else { sites = []; return }
+                // Prefer main bundle Resources
+                var bundledURL: URL? = Bundle.main.url(forResource: "whitelist", withExtension: "json")
+                // Fallback to SwiftPM bundle inside app Resources (without touching Bundle.module)
+                if bundledURL == nil, let base = Bundle.main.resourceURL {
+                    let candidate = base.appendingPathComponent("Vaaka_Vaaka.bundle").appendingPathComponent("whitelist.json")
+                    if FileManager.default.fileExists(atPath: candidate.path) { bundledURL = candidate }
+                }
+                guard let bundled = bundledURL else { sites = []; return }
                 let data = try Data(contentsOf: bundled)
                 let schema = try decoder.decode(FileSchema.self, from: data)
                 sites = schema.sites

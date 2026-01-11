@@ -103,10 +103,21 @@ class FaviconFetcher {
     // Load a bundled or cached resource image by resource name (e.g., "github.svg" or "site.png").
     func image(forResource name: String) -> NSImage? {
         if let cached = cache.object(forKey: name as NSString) { return cached }
-        // Try asset in app bundle first
-        if let img = NSImage(named: NSImage.Name(name)) { cache.setObject(img, forKey: name as NSString); return img }
-        // Fallback to looking in module resources
-        if let url = Bundle.module.url(forResource: name, withExtension: nil), let data = try? Data(contentsOf: url), let img = NSImage(data: data) { cache.setObject(img, forKey: name as NSString); return img }
+          // Try asset in app bundle first
+          if let img = NSImage(named: NSImage.Name(name)) { cache.setObject(img, forKey: name as NSString); return img }
+          if let url = Bundle.main.url(forResource: name, withExtension: nil),
+              let data = try? Data(contentsOf: url),
+              let img = NSImage(data: data) { cache.setObject(img, forKey: name as NSString); return img }
+        // Fallback to looking in SwiftPM module resources without touching Bundle.module
+        if let base = Bundle.main.resourceURL {
+            let modFile = base.appendingPathComponent("Vaaka_Vaaka.bundle").appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: modFile.path),
+               let data = try? Data(contentsOf: modFile),
+               let img = NSImage(data: data) {
+                cache.setObject(img, forKey: name as NSString)
+                return img
+            }
+        }
         // Finally, check on-disk saved favicons
         let file = faviconsDir.appendingPathComponent(name)
         if FileManager.default.fileExists(atPath: file.path) {
