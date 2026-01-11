@@ -162,14 +162,11 @@ class BrowserWindowController: NSWindowController {
             if let wv = v as? WKWebView, let id = wv.identifier?.rawValue {
                 if !currentSiteIds.contains(id) {
                     removed.append(id)
-                    DebugLogger.debug("sitesChanged: removing orphaned webView for site.id=\(id)")
                     wv.removeFromSuperview()
                     webViewsAttached.remove(id)
                 }
             }
         }
-        let afterSubviews = contentContainer.subviews.count
-        DebugLogger.debug("sitesChanged: contentContainer.subviews after=\(afterSubviews) removed=\(removed)")
 
         // If last active site got removed, SiteTabManager will have set activeIndex appropriately; update UI.
         activeTabChanged()
@@ -197,16 +194,6 @@ class BrowserWindowController: NSWindowController {
             // height to make icons comfortably touch-target
             item.heightAnchor.constraint(equalToConstant: 44).isActive = true
             item.widthAnchor.constraint(equalToConstant: railWidth).isActive = true
-
-            // Diagnostic: log favicon presence on create
-            if let fname = tab.site.favicon {
-                let exists = FaviconFetcher.shared.resourceExistsOnDisk(fname)
-                let loaded = FaviconFetcher.shared.image(forResource: fname) != nil
-                DebugLogger.trace("rebuildRailButtons: site.id=\(tab.site.id) favicon=\(fname) exists=\(exists) imageLoadable=\(loaded)")
-            } else {
-                DebugLogger.trace("rebuildRailButtons: site.id=\(tab.site.id) favicon=nil")
-            }
-            DebugLogger.debug("rebuildRailButtons: created RailItemView for site.id=\(tab.site.id) debug=\(item.debugInfo())")
         }
     }
 
@@ -220,8 +207,6 @@ class BrowserWindowController: NSWindowController {
         let tabs = SiteTabManager.shared.tabs
         for tab in tabs {
             if webViewsAttached.contains(tab.site.id) { continue }
-            // Diagnostic: log the state before attaching
-DebugLogger.trace("attachAllWebViewsIfNeeded: attaching site.id=\(tab.site.id) webView.url=\(tab.webView.url?.absoluteString ?? "<no-url>") webView.isHidden=\(tab.webView.isHidden) frame=\(tab.webView.frame)")
 
             // Attach once
             let webView = tab.webView
@@ -237,12 +222,8 @@ DebugLogger.trace("attachAllWebViewsIfNeeded: attaching site.id=\(tab.site.id) w
             webView.isHidden = true
             webViewsAttached.insert(tab.site.id)
 
-            // Diagnostic: confirm attached and state
-            DebugLogger.trace("attachAllWebViewsIfNeeded: attached site.id=\(tab.site.id) webView.superview=\(webView.superview != nil) frame=\(webView.frame) isHidden=\(webView.isHidden)")
-
             // Start navigation only after the webview is attached to the view hierarchy
             tab.loadStartURLIfNeeded()
-            DebugLogger.trace("attachAllWebViewsIfNeeded: called loadStartURLIfNeeded for site.id=\(tab.site.id)")
         }
     }
 
@@ -250,9 +231,7 @@ DebugLogger.trace("attachAllWebViewsIfNeeded: attaching site.id=\(tab.site.id) w
         let tabs = SiteTabManager.shared.tabs
         for (i, tab) in tabs.enumerated() {
             let willHide = (i != index)
-            if tab.webView.isHidden != willHide {
-                DebugLogger.trace("setActiveWebViewVisibility: site.id=\(tab.site.id) oldHidden=\(tab.webView.isHidden) newHidden=\(willHide) index=\(i) activeIndex=\(index) webView.url=\(tab.webView.url?.absoluteString ?? "<no-url>")")
-            }
+
             tab.webView.isHidden = willHide
         }
     }

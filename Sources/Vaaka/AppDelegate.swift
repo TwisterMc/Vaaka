@@ -5,7 +5,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var windowController: BrowserWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        DebugLogger.debug("AppDelegate.applicationDidFinishLaunching start")
         // Ensure sites are loaded from settings (bundled or persisted)
         SiteManager.shared.loadSites()
 
@@ -24,10 +23,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Create a minimal app menu so standard actions are available
         createMainMenu()
-
-        // Log final launched frame
-        print("[DEBUG] Vaaka launched: window frame=\(windowController?.window?.frame ?? .zero)")
-        vaakaLog("Launched; window frame=\(windowController?.window?.frame ?? .zero)")
     }
 
     private func sessionFileURL() -> URL? {

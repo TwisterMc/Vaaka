@@ -36,10 +36,8 @@ final class SiteTabManager: NSObject {
 
     private override init() {
         super.init()
-        DebugLogger.debug("SiteTabManager.init start")
         // Build tabs from current sites
         rebuildTabs()
-        DebugLogger.debug("SiteTabManager.init after rebuild: tabs=\(tabs.count)")
         NotificationCenter.default.addObserver(self, selector: #selector(sitesChanged), name: .SitesChanged, object: nil)
         restoreLastActiveSite()
         // Initialization complete — flip flag and notify observers once (defer notifications to next run loop to avoid re-entrancy during static init)
@@ -48,7 +46,6 @@ final class SiteTabManager: NSObject {
             NotificationCenter.default.post(name: .TabsChanged, object: self)
             NotificationCenter.default.post(name: .ActiveTabChanged, object: self)
         }
-        DebugLogger.debug("SiteTabManager.init done: activeIndex=\(activeIndex)")
     }
 
     @objc private func sitesChanged() {
@@ -58,13 +55,8 @@ final class SiteTabManager: NSObject {
 
     private func rebuildTabs() {
         let sites = SiteManager.shared.sites
-        // Diagnostic: log currently existing tabs and their URLs to help track unexpected blanking
-        let existingInfo = tabs.map { "\($0.site.id):\($0.webView.url?.absoluteString ?? "<no-url>")" }
-        DebugLogger.debug("rebuildTabs: existing tabs count=\(tabs.count) info=\(existingInfo)")
-
         // Create tabs in same order; reuse existing SiteTab instances where the site id is unchanged
         var newTabs: [SiteTab] = []
-        DebugLogger.debug("rebuildTabs: sites.count=\(sites.count)")
 
         // Map existing tabs by site id for reuse
         var existingById: [String: SiteTab] = [:]
@@ -72,20 +64,18 @@ final class SiteTabManager: NSObject {
 
         for site in sites {
             if let existing = existingById[site.id] {
-                DebugLogger.debug("rebuildTabs: reusing tab for site id=\(site.id) name=\(site.name)")
                 newTabs.append(existing)
                 // Remove from existingById map — remaining entries will be considered removed
                 existingById.removeValue(forKey: site.id)
                 continue
             }
 
-            DebugLogger.debug("rebuildTabs: creating tab for site id=\(site.id) name=\(site.name)")
             let config = WKWebViewConfiguration()
             let webpagePreferences = WKWebpagePreferences()
             webpagePreferences.allowsContentJavaScript = true
             config.defaultWebpagePreferences = webpagePreferences
 
-            // Diagnostics: forward console.* messages from pages to the host app for debugging
+            // Forward console.* messages from pages to the host app for debugging
             let userContent = WKUserContentController()
             let consoleScript = """
             (function () {
@@ -130,12 +120,7 @@ final class SiteTabManager: NSObject {
             newTabs.append(tab)
         }
         // Any site ids still present in `existingById` are removed — their webviews should be cleaned by BrowserWindow
-        if !existingById.isEmpty {
-            DebugLogger.debug("rebuildTabs: removed site ids=\(Array(existingById.keys))")
-        }
         tabs = newTabs
-        let newInfo = tabs.map { "\($0.site.id):\($0.webView.url?.absoluteString ?? "<no-url>")" }
-        DebugLogger.debug("rebuildTabs: new tabs count=\(tabs.count) info=\(newInfo)")
         // Adjust active index to valid range
         if tabs.isEmpty {
             activeIndex = 0

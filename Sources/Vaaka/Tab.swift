@@ -39,8 +39,8 @@ final class SiteTab: NSObject {
 
             // If we temporarily unhid the WebView for the initial load, re-hide it now that navigation started.
             if self.temporarilyUnhiddenForLoad {
-                DebugLogger.debug("SiteTab: re-hiding webView after navigation started for site.id=\(self.site.id)")
                 self.temporarilyUnhiddenForLoad = false
+                self.webView.isHidden = true
             }
 
             self.navigationStuckWorkItem?.cancel()
@@ -52,7 +52,6 @@ final class SiteTab: NSObject {
                     DispatchQueue.main.async {
                         // Try to recover by activating the tab (makes WebView visible) and reloading once.
                         if let idx = SiteTabManager.shared.tabs.firstIndex(where: { $0.site.id == self.site.id }) {
-                            DebugLogger.debug("SiteTab.navigation stuck: activating tab idx=\(idx) id=\(self.site.id) and reloading")
                             SiteTabManager.shared.setActiveIndex(idx)
                             self.webView.reload()
                             // Telemetry: note we've fired the stuck watchdog and attempted in-app recovery
@@ -62,7 +61,6 @@ final class SiteTab: NSObject {
                             let finalWi = DispatchWorkItem { [weak self] in
                                 guard let self = self else { return }
                                 if self.navigationInProgress {
-                                    DebugLogger.warn("SiteTab.navigation final watchdog fired: site.id=\(self.site.id) — opening externally")
                                     // Telemetry: final fallback
                                     Telemetry.shared.recordStuckWatchdog(siteId: self.site.id, phase: "final_fallback")
                                     NSWorkspace.shared.open(self.site.url)
@@ -116,22 +114,12 @@ final class SiteTab: NSObject {
             req.setValue("1", forHTTPHeaderField: "DNT")
         }
 
-        // Optional diagnostic: temporarily unhide the WebView for the first load if the test flag is present.
-        if ProcessInfo.processInfo.arguments.contains("--test-unhide-before-load") {
-            print("[DEBUG] SiteTab.loadStartURLIfNeeded: temporarily un-hiding webView for site.id=\(site.id)")
-            webView.isHidden = false
-            temporarilyUnhiddenForLoad = true
-        }
-
-        DebugLogger.debug("SiteTab.loadStartURLIfNeeded: site.id=\(site.id) url=\(site.url.absoluteString) webViewHidden=\(webView.isHidden) — calling webView.load")
-        let nav = webView.load(req)
-        DebugLogger.debug("SiteTab.loadStartURLIfNeeded: webView.load returned navigation=\(nav != nil ? "non-nil" : "nil")")
+        let _ = webView.load(req)
 
         // Start a watchdog: if navigation hasn't begun in 10s, fall back and open externally.
         let wi = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             if self.webView.url == nil {
-                DebugLogger.warn("SiteTab.load watchdog fired: site.id=\(self.site.id) url=\(self.site.url.absoluteString) — opening externally")
                 Telemetry.shared.recordLoadWatchdog(siteId: self.site.id)
                 NSWorkspace.shared.open(self.site.url)
                 // Ensure UI spinner is not left running
@@ -189,7 +177,6 @@ final class SiteTab: NSObject {
         """
 
         DispatchQueue.main.async {
-            print("[INFO] SiteTab.showErrorPage: site.id=\(self.site.id) showing internal error page for url=\(failedURL) display=\(displayHost ?? "<none>")")
             // Ensure the tab is visible
             if let idx = SiteTabManager.shared.tabs.firstIndex(where: { $0.site.id == self.site.id }) {
                 SiteTabManager.shared.setActiveIndex(idx)
