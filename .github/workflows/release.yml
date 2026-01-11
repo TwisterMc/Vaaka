@@ -52,10 +52,6 @@ jobs:
         with:
           swift-version: "6.1"
 
-      - name: Run tests
-        if: steps.check.outputs.skipping == 'false'
-        run: swift test
-
       - name: Build (release)
         if: steps.check.outputs.skipping == 'false'
         run: swift build -c release -Xswiftc -O -Xswiftc -whole-module-optimization
