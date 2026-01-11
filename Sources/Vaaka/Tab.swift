@@ -109,7 +109,14 @@ final class SiteTab: NSObject {
     func loadStartURLIfNeeded() {
         guard !hasLoadedStartURL else { return }
         hasLoadedStartURL = true
-        var req = URLRequest(url: site.url)
+        // Try to restore last visited URL for this site
+        var startURL: URL = site.url
+        if let lastStr = UserDefaults.standard.string(forKey: "Vaaka.LastURL.\(site.id)"),
+           let lastURL = URL(string: lastStr),
+           SiteManager.hostMatches(host: lastURL.host, siteHost: site.url.host) {
+            startURL = lastURL
+        }
+        var req = URLRequest(url: startURL)
         // If Send-DNT is enabled, include the DNT header for top-level loads
         if UserDefaults.standard.bool(forKey: "Vaaka.SendDNT") {
             req.setValue("1", forHTTPHeaderField: "DNT")

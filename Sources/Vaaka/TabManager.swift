@@ -227,6 +227,10 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
         // Telemetry: record navigation finish
         Telemetry.shared.recordNavigationFinish(siteId: site.id, url: webView.url)
+        // Persist last visited in-site URL for this site so we can restore it on next launch
+        if let u = webView.url, let host = u.host, SiteManager.hostMatches(host: host, siteHost: site.url.host) {
+            UserDefaults.standard.set(u.absoluteString, forKey: "Vaaka.LastURL.\(site.id)")
+        }
         // For diagnostics: capture the effective navigator.userAgent seen by pages so we can
         // verify servers and scripts will see the desired Safari-like UA.
         webView.evaluateJavaScript("navigator.userAgent") { result, error in
