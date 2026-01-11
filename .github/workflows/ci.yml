@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  test:
+    name: Test on ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner:
+          - macos-15
+          - macos-15-intel
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v2
+
+      - name: Run tests
+        run: swift test -v
+
+  build:
+    name: Build on ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner:
+          - macos-15
+          - macos-15-intel
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v2
+
+      - name: Build app (debug)
+        run: swift build -v
+
+      - name: Package app
+        run: bash scripts/package_app.sh
+
+      - name: Verify app structure
+        run: |
+          test -d build/Vaaka.app/Contents/MacOS || (echo "MacOS directory not found" && exit 1)
+          test -f build/Vaaka.app/Contents/Info.plist || (echo "Info.plist not found" && exit 1)
+          test -f build/Vaaka.app/Contents/Resources/whitelist.json || (echo "whitelist.json not found" && exit 1)
+          echo "✓ App structure is valid"
