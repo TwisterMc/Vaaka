@@ -95,7 +95,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
 
         // Remote update controls for blocker
         // EasyList-only controls
-        let importEasy = NSButton(title: "Update EasyList", target: self, action: #selector(importEasyListPressed))
+        let importEasy = NSButton(title: "Update Ad-Blocking Rules", target: self, action: #selector(importEasyListPressed))
         importEasy.bezelStyle = .rounded
         importEasy.toolTip = "Fetch EasyList and convert to content-blocker rules"
 
