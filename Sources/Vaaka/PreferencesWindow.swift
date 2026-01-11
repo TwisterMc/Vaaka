@@ -7,10 +7,11 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     private var detailPane: NSView?
     private var generalPane: NSView?
     private var privacyPane: NSView?
+    private var appearancePane: NSView?
     private var splitStack: NSStackView?
     // Sidebar source-list
     private var sidebarTable: NSTableView?
-    private let sidebarItems = ["General", "Privacy"]
+    private let sidebarItems = ["General", "Appearance", "Privacy"]
     // Remote update helper UI
     private var remoteStatusLabel: NSTextField?
     private var importEasyButton: NSButton?
@@ -18,13 +19,17 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     private var lastUpdatedLabel: NSTextField?
     convenience init() {
         let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 640, height: 360), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "Preferences"
+        window.title = "Settings"
         self.init(window: window)
         setupUI()
     }
 
     override init(window: NSWindow?) {
         super.init(window: window)
+        // Observe appearance changes
+        NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
+        // Apply appearance preference
+        applyAppearance()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -146,7 +151,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         sidebarTable.target = self
         sidebarTable.action = #selector(sidebarTableClicked(_:))
         sidebarTable.focusRingType = .default
-        sidebarTable.setAccessibilityLabel("Preferences Sidebar")
+        sidebarTable.setAccessibilityLabel("Settings Sidebar")
 
         // Select first row by default (General)
         DispatchQueue.main.async { sidebarTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }
@@ -198,7 +203,6 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // Accessibility
         // (No custom URL or updateNow — EasyList only)
 
-
         let privacyStack = NSStackView(views: [privacyHeader, blockTrackers, sendDNT, urlRow])
         privacyStack.orientation = .vertical
         privacyStack.alignment = .leading
@@ -227,15 +231,65 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         self.splitStack = splitStack
 
         // Put general pane into the detail container and add privacyPane as hidden child
+        // Appearance pane
+        let appearancePane = NSView()
+        appearancePane.translatesAutoresizingMaskIntoConstraints = false
+        let appearanceHeader = NSTextField(labelWithString: "Appearance")
+        appearanceHeader.font = NSFont.boldSystemFont(ofSize: 13)
+        appearanceHeader.textColor = NSColor.labelColor
+        appearanceHeader.alignment = .left
+
+        // Dark mode controls
+        let darkModeLabel = NSTextField(labelWithString: "Dark Mode:")
+        darkModeLabel.font = NSFont.systemFont(ofSize: 11)
+        let darkModePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        darkModePopup.addItems(withTitles: ["Light", "Dark", "Match System"])
+        let currentDarkMode = AppearanceManager.shared.darkModePreference
+        let selectedIndex = currentDarkMode == .light ? 0 : (currentDarkMode == .dark ? 1 : 2)
+        darkModePopup.selectItem(at: selectedIndex)
+        darkModePopup.target = self
+        darkModePopup.action = #selector(darkModeChanged(_:))
+        darkModePopup.setAccessibilityLabel("Dark Mode")
+        let darkModeRow = NSStackView(views: [darkModeLabel, darkModePopup])
+        darkModeRow.orientation = .horizontal
+        darkModeRow.spacing = 8
+        darkModeRow.alignment = .centerY
+        darkModeLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        // Theme color control
+        let useThemeColor = NSButton(checkboxWithTitle: "Use site color", target: self, action: #selector(toggleUseThemeColor(_:)))
+        useThemeColor.state = AppearanceManager.shared.useThemeColor ? .on : .off
+        useThemeColor.toolTip = "Tint the window and sidebar with the site’s color (from favicon)"
+
+        let appearanceStack = NSStackView(views: [appearanceHeader, darkModeRow, useThemeColor])
+        appearanceStack.orientation = .vertical
+        appearanceStack.alignment = .leading
+        appearanceStack.spacing = 10
+        appearanceStack.translatesAutoresizingMaskIntoConstraints = false
+        appearancePane.addSubview(appearanceStack)
+        NSLayoutConstraint.activate([
+            appearanceStack.leadingAnchor.constraint(equalTo: appearancePane.leadingAnchor, constant: 12),
+            appearanceStack.trailingAnchor.constraint(equalTo: appearancePane.trailingAnchor, constant: -12),
+            appearanceStack.topAnchor.constraint(equalTo: appearancePane.topAnchor, constant: 12),
+            appearanceStack.bottomAnchor.constraint(equalTo: appearancePane.bottomAnchor, constant: -12)
+        ])
+
         detailContainer.addSubview(generalPane)
+        detailContainer.addSubview(appearancePane)
         detailContainer.addSubview(privacyPane)
         privacyPane.isHidden = true
+        appearancePane.isHidden = true
         generalPane.translatesAutoresizingMaskIntoConstraints = false
+        appearancePane.translatesAutoresizingMaskIntoConstraints = false
         privacyPane.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             generalPane.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
             generalPane.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
             generalPane.topAnchor.constraint(equalTo: detailContainer.topAnchor),
+
+            appearancePane.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
+            appearancePane.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
+            appearancePane.topAnchor.constraint(equalTo: detailContainer.topAnchor),
 
             privacyPane.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
             privacyPane.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
@@ -272,6 +326,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
 
         // Keep references for swapping
         self.generalPane = generalPane
+        self.appearancePane = appearancePane
         self.privacyPane = privacyPane
         self.detailPane = generalPane
 
@@ -325,6 +380,25 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         UserDefaults.standard.set(on, forKey: "Vaaka.SendDNT")
     }
 
+    @objc private func darkModeChanged(_ sender: NSPopUpButton) {
+        let selectedIndex = sender.indexOfSelectedItem
+        let preference: AppearanceManager.DarkModePreference
+        switch selectedIndex {
+        case 0:
+            preference = .light
+        case 1:
+            preference = .dark
+        default:
+            preference = .system
+        }
+        AppearanceManager.shared.darkModePreference = preference
+    }
+
+    @objc private func toggleUseThemeColor(_ sender: NSButton) {
+        let on = sender.state == .on
+        AppearanceManager.shared.useThemeColor = on
+    }
+
 
 
     @objc private func updateBlockerNow() {
@@ -371,13 +445,17 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     }
 
     // MARK: - Settings-style sidebar helpers
-    private enum PrefPane { case general, privacy }
+    private enum PrefPane { case general, appearance, privacy }
 
     @objc private func sidebarTableClicked(_ sender: Any?) {
         guard let tv = sidebarTable else { return }
         let row = tv.selectedRow
         if row >= 0 && row < sidebarItems.count {
-            selectPane(row == 0 ? .general : .privacy)
+            switch row {
+            case 0: selectPane(.general)
+            case 1: selectPane(.appearance)
+            default: selectPane(.privacy)
+            }
         }
     }
 
@@ -386,14 +464,25 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         switch pane {
         case .general:
             generalPane?.isHidden = false
+            appearancePane?.isHidden = true
             privacyPane?.isHidden = true
             sidebarTable?.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        case .appearance:
+            generalPane?.isHidden = true
+            appearancePane?.isHidden = false
+            privacyPane?.isHidden = true
+            sidebarTable?.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
         case .privacy:
             generalPane?.isHidden = true
+            appearancePane?.isHidden = true
             privacyPane?.isHidden = false
-            sidebarTable?.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+            sidebarTable?.selectRowIndexes(IndexSet(integer: 2), byExtendingSelection: false)
         }
-        detailPane = (pane == .general) ? generalPane : privacyPane
+        switch pane {
+        case .general: detailPane = generalPane
+        case .appearance: detailPane = appearancePane
+        case .privacy: detailPane = privacyPane
+        }
     }
 
 
@@ -426,7 +515,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             }
         } else if tv == self.sidebarTable {
             let row = sidebarTable?.selectedRow ?? -1
-            if row == 0 { selectPane(.general) } else if row == 1 { selectPane(.privacy) }
+            if row == 0 { selectPane(.general) } else if row == 1 { selectPane(.appearance) } else if row == 2 { selectPane(.privacy) }
         }
     }
 
@@ -581,5 +670,14 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             return container
         }
         return nil
+    }
+
+    @objc private func appearanceChanged() {
+        applyAppearance()
+    }
+
+    private func applyAppearance() {
+        guard let win = self.window else { return }
+        win.appearance = AppearanceManager.shared.effectiveAppearance
     }
 }

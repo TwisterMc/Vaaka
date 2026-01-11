@@ -236,6 +236,7 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
                 DebugLogger.debug("navigator.userAgent: site.id=\(self.site.id) error=\(err)")
             }
         }
+        // Note: theme-color is now observed via KVO on WKWebView.themeColor property
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {

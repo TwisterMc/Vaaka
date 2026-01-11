@@ -117,6 +117,9 @@ final class SiteTab: NSObject {
 
         let _ = webView.load(req)
 
+        // Inject dark mode CSS if the preference is not light-only
+        injectDarkModeCSS()
+
         // Start a watchdog: if navigation hasn't begun in 10s, fall back and open externally.
         let wi = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
@@ -129,6 +132,31 @@ final class SiteTab: NSObject {
         }
         loadingWatchdogWorkItem = wi
         DispatchQueue.main.asyncAfter(deadline: .now() + 10.0, execute: wi)
+    }
+
+    /// Inject dark mode CSS based on the preference.
+    private func injectDarkModeCSS() {
+        let preference = AppearanceManager.shared.darkModePreference
+        guard preference != .light else { return }
+
+        let isDarkMode: Bool
+        switch preference {
+        case .light:
+            isDarkMode = false
+        case .dark:
+            isDarkMode = true
+        case .system:
+            isDarkMode = NSAppearance.current.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+
+        // Set the color-scheme on the document element to force dark or light mode
+        let js = """
+        (function() {
+            document.documentElement.style.colorScheme = '\(isDarkMode ? "dark" : "light")';
+        })();
+        """
+
+        webView.evaluateJavaScript(js)
     }
 
     /// Display an internal error page for the current site with Retry / Open in Browser / Dismiss buttons.

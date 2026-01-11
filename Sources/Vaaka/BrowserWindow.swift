@@ -23,6 +23,8 @@ class BrowserWindowController: NSWindowController {
         let style: NSWindow.StyleMask = [.titled, .closable, .resizable, .miniaturizable]
         let window = NSWindow(contentRect: rect, styleMask: style, backing: .buffered, defer: false)
         window.title = "Vaaka"
+        // Enable custom title bar coloring
+        window.titlebarAppearsTransparent = false
         self.init(window: window)
     }
 
@@ -43,6 +45,8 @@ class BrowserWindowController: NSWindowController {
         // Also react to site list changes
         NotificationCenter.default.addObserver(self, selector: #selector(sitesChanged), name: .SitesChanged, object: nil)
 
+        // Observe appearance changes
+        NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
 
         // Window delegate
         self.window?.delegate = self
@@ -57,6 +61,9 @@ class BrowserWindowController: NSWindowController {
             w.minSize = NSSize(width: 640, height: 400)
             w.contentMinSize = NSSize(width: 640, height: 400)
         }
+
+        // Apply appearance preference
+        applyAppearance()
 
         // Initial render
         rebuildRailButtons()
@@ -77,15 +84,15 @@ class BrowserWindowController: NSWindowController {
         // Rail container
         railContainer.translatesAutoresizingMaskIntoConstraints = false
         railContainer.wantsLayer = true
-        railContainer.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.02).cgColor
-        railContainer.layer?.borderColor = NSColor.separatorColor.cgColor
-        railContainer.layer?.borderWidth = 1.0
-
+        // Initial colors will be set by applyAppearance() after init
+        
         // Scroll view for rail
         railScrollView.translatesAutoresizingMaskIntoConstraints = false
         railScrollView.hasVerticalScroller = true
         railScrollView.drawsBackground = false
         railScrollView.borderType = .noBorder
+        railScrollView.wantsLayer = true
+        railScrollView.layer?.backgroundColor = NSColor.clear.cgColor
 
         // Stack view vertical
         railStackView.orientation = .vertical
@@ -93,10 +100,14 @@ class BrowserWindowController: NSWindowController {
         railStackView.spacing = 8
         railStackView.edgeInsets = NSEdgeInsets(top: 8, left: 6, bottom: 8, right: 6)
         railStackView.translatesAutoresizingMaskIntoConstraints = false
+        railStackView.wantsLayer = true
+        railStackView.layer?.backgroundColor = NSColor.clear.cgColor
 
         // Put stack into docView for scroll
         let docView = NSView()
         docView.translatesAutoresizingMaskIntoConstraints = false
+        docView.wantsLayer = true
+        docView.layer?.backgroundColor = NSColor.clear.cgColor
         docView.addSubview(railStackView)
         railScrollView.documentView = docView
 
@@ -184,6 +195,13 @@ class BrowserWindowController: NSWindowController {
             self.updateRailSelection(activeIndex: idx)
             self.setActiveWebViewVisibility(index: idx)
             self.updateWindowTitleForActiveTab()
+            // Apply favicon-derived color for the newly active tab if enabled
+            if AppearanceManager.shared.useThemeColor, let active = SiteTabManager.shared.activeTab() {
+                let color = FaviconColorExtractor.shared.cachedColor(forSiteID: active.site.id) ?? FaviconColorExtractor.shared.computeAndCacheColor(for: active.site)
+                if let c = color { self.applyThemeColorToWindow(c) } else { self.resetThemeColor() }
+            } else if !AppearanceManager.shared.useThemeColor {
+                self.resetThemeColor()
+            }
         }
     }
 
@@ -224,6 +242,8 @@ class BrowserWindowController: NSWindowController {
             webView.isHidden = true
             webViewsAttached.insert(tab.site.id)
 
+            // No themeColor observation; using favicon-derived color
+
             // Start navigation only after the webview is attached to the view hierarchy
             tab.loadStartURLIfNeeded()
         }
@@ -250,6 +270,85 @@ class BrowserWindowController: NSWindowController {
             }
         } else {
             win.title = "Vaaka"
+        }
+    }
+
+    private func applyThemeColorToWindow(_ color: NSColor) {
+        guard let win = self.window else { return }
+        
+        // Set window background color - this colors the title bar
+        win.backgroundColor = color.withAlphaComponent(1.0)
+        
+        // Apply the theme color to the sidebar
+        railContainer.wantsLayer = true
+        railContainer.layer?.backgroundColor = color.withAlphaComponent(1.0).cgColor
+        railContainer.layer?.borderWidth = 0.0
+        
+        // Subtle tint for content area
+        contentContainer.layer?.backgroundColor = color.withAlphaComponent(0.05).cgColor
+    }
+
+    @objc private func appearanceChanged() {
+        // Apply the user's appearance preference first
+        applyAppearance()
+        
+        // Then apply theme-color if enabled, which will override the background color
+        if AppearanceManager.shared.useThemeColor, let active = SiteTabManager.shared.activeTab() {
+            let color = FaviconColorExtractor.shared.cachedColor(forSiteID: active.site.id) ?? FaviconColorExtractor.shared.computeAndCacheColor(for: active.site)
+            if let c = color { applyThemeColorToWindow(c) } else { resetThemeColor() }
+        } else {
+            resetThemeColor()
+        }
+    }
+
+    // Using favicon dominant color; no WKWebView.themeColor KVO needed
+
+    private func resetThemeColor() {
+        guard let win = self.window else { return }
+        
+        // Reset window background to clear (let appearance control it)
+        win.backgroundColor = .clear
+        
+        // Reset sidebar - use properly resolved colors for current appearance
+        updateSidebarAppearance()
+        
+        // Reset content - resolve to current appearance
+        let effectiveAppearance = win.effectiveAppearance
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            contentContainer.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        }
+    }
+    
+    private func updateSidebarAppearance() {
+        // This method updates the sidebar color based on current effective appearance
+        // Called when appearance changes and when resetting theme-color
+        
+        // Resolve NSColor to the current appearance's actual color
+        if let effectiveAppearance = window?.effectiveAppearance {
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                railContainer.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+                railContainer.layer?.borderColor = NSColor.separatorColor.cgColor
+                railContainer.layer?.borderWidth = 1.0
+            }
+        }
+    }
+
+    private func applyAppearance() {
+        guard let win = self.window else { return }
+        win.appearance = AppearanceManager.shared.effectiveAppearance
+        
+        // Update sidebar colors to match new appearance (unless favicon-derived color is active)
+        let hasThemeColor = AppearanceManager.shared.useThemeColor &&
+            (SiteTabManager.shared.activeTab().map { FaviconColorExtractor.shared.cachedColor(forSiteID: $0.site.id) != nil } ?? false)
+        
+        if !hasThemeColor {
+            updateSidebarAppearance()
+        }
+        
+        // Update content container background for current appearance
+        let effectiveAppearance = win.effectiveAppearance
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            contentContainer.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         }
     }
 
@@ -292,9 +391,13 @@ class BrowserWindowController: NSWindowController {
         for case let item as RailItemView in railStackView.arrangedSubviews where item.site.id == id {
             item.setLoading(false)
         }
-        // If the finished site is the active tab, update window title
+        // If the finished site is the active tab, update window title and apply favicon-derived color
         if let active = SiteTabManager.shared.activeTab(), active.site.id == id {
             updateWindowTitleForActiveTab()
+            if AppearanceManager.shared.useThemeColor {
+                let color = FaviconColorExtractor.shared.cachedColor(forSiteID: id) ?? FaviconColorExtractor.shared.computeAndCacheColor(for: active.site)
+                if let c = color { applyThemeColorToWindow(c) }
+            }
         }
     }
 
