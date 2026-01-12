@@ -91,6 +91,12 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         sendDNT.state = UserDefaults.standard.bool(forKey: "Vaaka.SendDNT") ? .on : .off
         sendDNT.toolTip = "Send DNT: 1 for top-level page loads when enabled"
 
+        // Notifications
+        let enableNotifications = NSButton(checkboxWithTitle: "Enable website notifications", target: self, action: #selector(toggleNotifications(_:)))
+        let defaultNotificationsEnabled = UserDefaults.standard.object(forKey: "Vaaka.NotificationsEnabledGlobal") == nil || UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal")
+        enableNotifications.state = defaultNotificationsEnabled ? .on : .off
+        enableNotifications.toolTip = "Allow websites to send system notifications"
+
         // Warning label (place near bottom)
         let warningLabel = NSTextField(labelWithString: "Note: This app doesn't work with all sites due to their security standards (e.g., Slack).")
         warningLabel.font = NSFont.systemFont(ofSize: 11)
@@ -201,7 +207,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // Accessibility
         // (No custom URL or updateNow — EasyList only)
 
-        let privacyStack = NSStackView(views: [privacyHeader, blockTrackers, sendDNT, urlRow])
+        let privacyStack = NSStackView(views: [privacyHeader, blockTrackers, sendDNT, enableNotifications, urlRow])
         privacyStack.orientation = .vertical
         privacyStack.alignment = .leading
         privacyStack.spacing = 10
@@ -370,7 +376,19 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         UserDefaults.standard.set(on, forKey: "Vaaka.SendDNT")
     }
 
-    @objc private func darkModeChanged(_ sender: NSPopUpButton) {
+    @objc private func toggleNotifications(_ sender: NSButton) {
+        let on = sender.state == .on
+        UserDefaults.standard.set(on, forKey: "Vaaka.NotificationsEnabledGlobal")
+        
+        // Request permission if enabling
+        if on {
+            NotificationManager.shared.requestPermission { granted in
+                if !granted {
+                    print("[DEBUG] User denied notification permission")
+                }
+            }
+        }
+    }
         let selectedIndex = sender.indexOfSelectedItem
         let preference: AppearanceManager.DarkModePreference
         switch selectedIndex {
