@@ -47,8 +47,8 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     /// Send a notification using UserNotifications framework
     func sendNotification(title: String, body: String, siteId: String) {
-        // Check if notifications are globally enabled
-        let globalEnabled = UserDefaults.standard.object(forKey: "Vaaka.NotificationsEnabledGlobal") == nil || UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal")
+        // Check if notifications are globally enabled (disabled by default)
+        let globalEnabled = UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal")
         guard globalEnabled else { return }
         
         // Check if notifications are enabled for this site
@@ -79,8 +79,8 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     func isEnabledForSite(_ siteId: String) -> Bool {
         let defaults = UserDefaults.standard
         let key = "Vaaka.NotificationsEnabled.\(siteId)"
-        // Default to true if not explicitly disabled
-        return defaults.object(forKey: key) == nil || defaults.bool(forKey: key)
+        // Default to false (disabled) if not explicitly enabled
+        return defaults.bool(forKey: key)
     }
 
     /// Enable/disable notifications for a site
