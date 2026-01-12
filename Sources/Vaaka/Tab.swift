@@ -53,15 +53,11 @@ final class SiteTab: NSObject {
                         if let idx = SiteTabManager.shared.tabs.firstIndex(where: { $0.site.id == self.site.id }) {
                             SiteTabManager.shared.setActiveIndex(idx)
                             self.webView.reload()
-                            // Telemetry: note we've fired the stuck watchdog and attempted in-app recovery
-                            Telemetry.shared.recordStuckWatchdog(siteId: self.site.id, phase: "recovery_attempt")
                             // Schedule a final fallback: open externally if reload doesn't finish within another `stuckTimeout` seconds.
                             self.navigationStuckWorkItem?.cancel()
                             let finalWi = DispatchWorkItem { [weak self] in
                                 guard let self = self else { return }
                                 if self.navigationInProgress {
-                                    // Telemetry: final fallback
-                                    Telemetry.shared.recordStuckWatchdog(siteId: self.site.id, phase: "final_fallback")
                                     NSWorkspace.shared.open(self.site.url)
                                     NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: self.site.id)
                                     self.navigationInProgress = false
@@ -71,7 +67,6 @@ final class SiteTab: NSObject {
                             DispatchQueue.main.asyncAfter(deadline: .now() + stuckTimeout, execute: finalWi)
                         } else {
                             // No tab index found — open externally as a fallback
-                            print("[WARN] SiteTab.navigation stuck watchdog: no tab found for site.id=\(self.site.id), opening externally")
                             NSWorkspace.shared.open(self.site.url)
                             NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: self.site.id)
                             self.navigationInProgress = false
@@ -130,7 +125,6 @@ final class SiteTab: NSObject {
         let wi = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             if self.webView.url == nil {
-                Telemetry.shared.recordLoadWatchdog(siteId: self.site.id)
                 NSWorkspace.shared.open(self.site.url)
                 // Ensure UI spinner is not left running
                 NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: self.site.id)

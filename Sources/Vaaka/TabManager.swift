@@ -171,12 +171,10 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
             // If the link looks like an SSO/IdP target, open externally by default to avoid embedded-browser failures.
             let isSSO = SSODetector.isSSO(url)
             if isSSO {
-                Telemetry.shared.recordExternalOpen(siteId: site.id, url: url)
                 NSWorkspace.shared.open(url)
                 return decisionHandler(.cancel)
             }
 
-            Telemetry.shared.recordExternalOpen(siteId: site.id, url: url)
             NSWorkspace.shared.open(url)
             return decisionHandler(.cancel)
         }
@@ -188,14 +186,10 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
     // Notify BrowserWindow about start/finish to allow UI updates (loading indicators)
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: site.id)
-        // Telemetry: record navigation start
-        Telemetry.shared.recordNavigationStart(siteId: site.id, url: webView.url)
-
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
-        Telemetry.shared.recordNavigationFinish(siteId: site.id, url: webView.url)
         if let u = webView.url, let host = u.host, SiteManager.hostMatches(host: host, siteHost: site.url.host) {
             UserDefaults.standard.set(u.absoluteString, forKey: "Vaaka.LastURL.\(site.id)")
         }
@@ -204,14 +198,12 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let nsErr = error as NSError
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
-        Telemetry.shared.recordNavigationFailure(siteId: site.id, url: webView.url, domain: nsErr.domain, code: nsErr.code, description: nsErr.localizedDescription)
         NotificationCenter.default.post(name: .SiteTabDidFailLoading, object: nil, userInfo: ["siteId": site.id, "url": webView.url?.absoluteString ?? "<no-url>", "errorDomain": nsErr.domain, "errorCode": nsErr.code, "errorDescription": nsErr.localizedDescription])
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         let nsErr = error as NSError
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
-        Telemetry.shared.recordNavigationFailure(siteId: site.id, url: webView.url, domain: nsErr.domain, code: nsErr.code, description: nsErr.localizedDescription)
         NotificationCenter.default.post(name: .SiteTabDidFailLoading, object: nil, userInfo: ["siteId": site.id, "url": webView.url?.absoluteString ?? "<no-url>", "errorDomain": nsErr.domain, "errorCode": nsErr.code, "errorDescription": nsErr.localizedDescription])
     }
 
@@ -232,13 +224,10 @@ private final class ErrorMessageHandler: NSObject, WKScriptMessageHandler {
                 switch action {
                 case "retry":
                     tab.webView.load(URLRequest(url: tab.site.url))
-                    Telemetry.shared.recordUserAction(siteId: tab.site.id, action: "retry_from_error_page")
                 case "open":
                     NSWorkspace.shared.open(tab.site.url)
-                    Telemetry.shared.recordUserAction(siteId: tab.site.id, action: "open_in_browser_from_error_page")
                 case "dismiss":
                     tab.webView.loadHTMLString("", baseURL: nil)
-                    Telemetry.shared.recordUserAction(siteId: tab.site.id, action: "dismiss_error_page")
                 default:
                     break
                 }
