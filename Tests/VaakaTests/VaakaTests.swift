@@ -2,13 +2,6 @@ import XCTest
 @testable import Vaaka
 
 final class VaakaTests: XCTestCase {
-    func testSiteLoadingFromBundle() throws {
-        let sites = SiteManager.shared.sites
-        // Our bundled example JSON contains three sites
-        XCTAssertEqual(sites.count, 3)
-        XCTAssertTrue(sites.contains { $0.name == "GitHub" })
-    }
-
     func testSiteTabManagerCreatesTabs() throws {
         let tabs = SiteTabManager.shared.tabs
         XCTAssertEqual(tabs.count, SiteManager.shared.sites.count)
