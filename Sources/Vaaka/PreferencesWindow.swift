@@ -93,13 +93,6 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
 
         // Notifications moved to General pane
 
-        // Warning label (place near bottom)
-        let warningLabel = NSTextField(labelWithString: "Note: This app doesn't work with all sites due to their security standards (e.g., Slack).")
-        warningLabel.font = NSFont.systemFont(ofSize: 11)
-        warningLabel.textColor = NSColor.systemRed
-        warningLabel.lineBreakMode = .byWordWrapping
-        warningLabel.maximumNumberOfLines = 0
-
         // Remote update controls for blocker
         // EasyList-only controls
         let importEasy = NSButton(title: "Update Ad-Blocking Rules", target: self, action: #selector(importEasyListPressed))
@@ -303,26 +296,13 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         sidebarContainer.widthAnchor.constraint(equalToConstant: 160).isActive = true
         detailContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
 
-
-        // Warning under split
-        warningLabel.stringValue = "Note: Some sites may not work correctly when blocking is enabled (e.g., Slack)."
-        warningLabel.font = NSFont.systemFont(ofSize: 11)
-        warningLabel.textColor = NSColor.secondaryLabelColor
-        warningLabel.alignment = .left
-        warningLabel.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(warningLabel)
-
         NSLayoutConstraint.activate([
             splitStack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             splitStack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             splitStack.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
+            splitStack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
 
-            tableContainer.heightAnchor.constraint(equalToConstant: 220),
-
-            warningLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
-            warningLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            warningLabel.topAnchor.constraint(equalTo: splitStack.bottomAnchor, constant: 12),
-            warningLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12)
+            tableContainer.heightAnchor.constraint(equalToConstant: 220)
         ])
 
 
