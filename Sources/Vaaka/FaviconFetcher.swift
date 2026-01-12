@@ -28,7 +28,7 @@ class FaviconFetcher {
     // or generateMonoIcon(...) instead of calling this during normal page loads.
     func fetchFavicon(for url: URL, completion: @escaping (NSImage?) -> Void) {
         guard let host = url.host else { completion(nil); return }
-        // First try to discover icons from the page's HTML (link rel icons), then fallback to common /favicon.ico paths.
+        // First try to discover icons from the page's HTML (link rel icons and manifest.json), then fallback to common /favicon.ico paths.
         discoverIconCandidates(baseURL: url) { candidates in
             var urls = candidates
             
@@ -43,12 +43,6 @@ class FaviconFetcher {
             urls.append(URL(string: "https://\(host)/apple-touch-icon-precomposed.png")!)
             if let wHost = wwwHost {
                 urls.append(URL(string: "https://\(wHost)/apple-touch-icon-precomposed.png")!)
-            }
-            
-            // Google-specific favicon endpoints (calendar, workspace, etc)
-            if host.contains("google.com") || host.contains("workspace.google.com") {
-                urls.append(URL(string: "https://workspace.google.com/lp/static/images/favicon.ico")!)
-                urls.append(URL(string: "https://fonts.gstatic.com/s/i/productlogos/calendar_2020q4/v13/192px.svg")!)
             }
             
             urls.append(URL(string: "https://\(host)/favicon.ico")!)
@@ -110,7 +104,7 @@ class FaviconFetcher {
     }
 
     private func parseIconLinks(fromHTML html: String, baseURL: URL) -> [URL] {
-        // Extract <link> tags for icons and prioritize by size/type
+        // Extract <link> tags for icons and prioritize by size/type, also check manifest.json
         var results: [(url: URL, priority: Int)] = []
         
         // Match <link ...> tags
@@ -119,10 +113,12 @@ class FaviconFetcher {
         let ns = html as NSString
         let matches = regex.matches(in: html, options: [], range: NSRange(location: 0, length: ns.length))
         
+        var manifestURL: URL?
+        
         for match in matches {
             let linkTag = ns.substring(with: match.range)
             
-            // Check if this is an icon link
+            // Check for manifest link first
             guard linkTag.lowercased().contains("rel=") else { continue }
             let relPattern = "rel=[\'\"]?([^\"'>]+)[\"']?"
             guard let relRegex = try? NSRegularExpression(pattern: relPattern, options: [.caseInsensitive]),
@@ -131,6 +127,19 @@ class FaviconFetcher {
             let relRange = relMatch.range(at: 1)
             let rel = (linkTag as NSString).substring(with: relRange).lowercased()
             
+            if rel.contains("manifest") {
+                let hrefPattern = "href=[\'\"]?([^\"'>]+)[\"']?"
+                guard let hrefRegex = try? NSRegularExpression(pattern: hrefPattern, options: [.caseInsensitive]),
+                      let hrefMatch = hrefRegex.firstMatch(in: linkTag, options: [], range: NSRange(location: 0, length: linkTag.count)) else { continue }
+                let hrefRange = hrefMatch.range(at: 1)
+                let href = (linkTag as NSString).substring(with: hrefRange)
+                if let resolved = URL(string: href, relativeTo: baseURL)?.absoluteURL {
+                    manifestURL = resolved
+                }
+                continue
+            }
+            
+            // Check if this is an icon link
             if !rel.contains("icon") && !rel.contains("shortcut") && !rel.contains("apple") {
                 continue
             }
@@ -145,38 +154,42 @@ class FaviconFetcher {
             
             guard let resolved = URL(string: href, relativeTo: baseURL)?.absoluteURL else { continue }
             
-            // Prioritize by type and size
+            // Prioritize by type: SVG > PNG/JPG > ICO
             var priority = 0
             let lowerHref = href.lowercased()
             
-            // SVG is highest priority (infinitely scalable, always crisp)
             if lowerHref.contains(".svg") {
-                priority = 10000
+                priority = 400
+            } else if lowerHref.contains(".png") || lowerHref.contains(".jpg") || lowerHref.contains(".jpeg") {
+                priority = 200
+            } else if lowerHref.contains(".ico") {
+                priority = 100
             }
-            // Apple touch icons are usually large (180x180+)
-            else if rel.contains("apple") {
-                priority = 1000
-            }
-            // PNG is better than ICO for larger sizes
-            else if lowerHref.contains(".png") {
-                priority = 500
-            }
-            // Extract size hint if present and boost priority for larger icons
-            let sizePattern = "sizes=[\'\"]?([^\"'>]+)[\"']?"
-            if let sizeRegex = try? NSRegularExpression(pattern: sizePattern, options: [.caseInsensitive]),
-               let sizeMatch = sizeRegex.firstMatch(in: linkTag, options: [], range: NSRange(location: 0, length: linkTag.count)) {
-                let sizeRange = sizeMatch.range(at: 1)
-                let sizeStr = (linkTag as NSString).substring(with: sizeRange)
-                // Parse size hints like "192x192" or "any"
-                if sizeStr == "any" {
-                    priority += 500  // "any" usually means SVG
-                } else if let size = Int(sizeStr.split(separator: "x").first ?? "") {
-                    // Heavily favor larger icons for Retina displays
-                    priority += size  // Direct size bonus (192x192 gets +192, etc.)
-                }
+            
+            // Apple touch icons get a small boost
+            if rel.contains("apple") {
+                priority += 10
             }
             
             results.append((url: resolved, priority: priority))
+        }
+        
+        // If a manifest was found, fetch and parse it for icons (site owner curated, get +50 boost)
+        if let manifestURL = manifestURL {
+            if let icons = extractIconsFromManifest(manifestURL: manifestURL, baseURL: baseURL) {
+                for icon in icons {
+                    let iconUrl = icon.absoluteString.lowercased()
+                    let basePriority: Int
+                    if iconUrl.contains(".svg") {
+                        basePriority = 400
+                    } else if iconUrl.contains(".png") || iconUrl.contains(".jpg") || iconUrl.contains(".jpeg") {
+                        basePriority = 200
+                    } else {
+                        basePriority = 100
+                    }
+                    results.append((url: icon, priority: basePriority + 50))
+                }
+            }
         }
         
         // Sort by priority descending, deduplicate, and return URLs
@@ -191,6 +204,39 @@ class FaviconFetcher {
             }
         }
         return finalURLs
+    }
+
+    private func extractIconsFromManifest(manifestURL: URL, baseURL: URL) -> [URL]? {
+        var icons: [URL] = []
+        var req = URLRequest(url: manifestURL)
+        req.setValue(UserAgent.safari, forHTTPHeaderField: "User-Agent")
+        req.timeoutInterval = 5.0
+        
+        let semaphore = DispatchSemaphore(value: 0)
+        let task = session.dataTask(with: req) { data, resp, err in
+            defer { semaphore.signal() }
+            guard let data = data else { return }
+            
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let iconsArray = json["icons"] as? [[String: Any]] {
+                    for iconObj in iconsArray {
+                        if let iconSrc = iconObj["src"] as? String {
+                            if let resolved = URL(string: iconSrc, relativeTo: baseURL)?.absoluteURL {
+                                icons.append(resolved)
+                            }
+                        }
+                    }
+                }
+            } catch {
+                // Failed to parse manifest JSON
+            }
+        }
+        task.resume()
+        
+        // Wait up to 3 seconds for manifest fetch
+        let result = semaphore.wait(timeout: .now() + 3.0)
+        return result == .timedOut ? nil : (icons.isEmpty ? nil : icons)
     }
 
     // Directory where saved favicons are stored (Application Support/Vaaka/favicons)

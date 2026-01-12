@@ -3,6 +3,7 @@ import AppKit
 class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private let tableView = NSTableView()
     private var tableContainer: NSScrollView!
+    private let siteDragType = NSPasteboard.PasteboardType("com.vaaka.site-row")
     // Detail pane references for Settings-style sheet
     private var detailPane: NSView?
     private var generalPane: NSView?
@@ -62,6 +63,9 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         tableView.dataSource = self
         tableView.usesAutomaticRowHeights = true
         tableView.allowsMultipleSelection = false
+        tableView.registerForDraggedTypes([siteDragType])
+        tableView.setDraggingSourceOperationMask(.move, forLocal: true)
+        tableView.draggingDestinationFeedbackStyle = .gap
         // Support double-click to edit
         tableView.target = self
         tableView.doubleAction = #selector(editSelected)
@@ -525,6 +529,42 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             return sidebarItems.count
         }
         return 0
+    }
+
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        guard tableView == self.tableView else { return nil }
+        let sites = SiteManager.shared.sites
+        guard row < sites.count else { return nil }
+        let item = NSPasteboardItem()
+        item.setString(sites[row].id, forType: siteDragType)
+        return item
+    }
+
+    func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+        guard tableView == self.tableView else { return [] }
+        let cappedRow = min(row, SiteManager.shared.sites.count)
+        tableView.setDropRow(cappedRow, dropOperation: .above)
+        return .move
+    }
+
+    func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+        guard tableView == self.tableView else { return false }
+        guard let item = info.draggingPasteboard.pasteboardItems?.first,
+              let siteId = item.string(forType: siteDragType) else { return false }
+
+        let sites = SiteManager.shared.sites
+        guard let fromIndex = sites.firstIndex(where: { $0.id == siteId }) else { return false }
+
+        var updated = sites
+        let site = updated.remove(at: fromIndex)
+        var target = row
+        if target > updated.count { target = updated.count }
+        if fromIndex < target { target -= 1 }
+        updated.insert(site, at: target)
+        SiteManager.shared.replaceSites(updated)
+        tableView.reloadData()
+        tableView.selectRowIndexes(IndexSet(integer: target), byExtendingSelection: false)
+        return true
     }
 
     // MARK: - Remote blocker helpers (fields)

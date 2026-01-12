@@ -75,11 +75,8 @@ final class SiteTabManager: NSObject {
             webpagePreferences.allowsContentJavaScript = true
             config.defaultWebpagePreferences = webpagePreferences
 
-            // Forward console.* messages from pages to the host app for debugging
-                        let userContent = WKUserContentController()
-            // Error page handler receives actions from our internal error page (retry/open/dismiss)
+            let userContent = WKUserContentController()
             userContent.add(ErrorMessageHandler(siteId: site.id), name: "vaakaError")
-            // Notification handler for capturing website notifications
             userContent.add(NotificationMessageHandler(site: site), name: "vaakaNotification")
             // Inject script to intercept Notification API
             let script = WKUserScript(source: notificationInjectionScript, injectionTime: .atDocumentStart, forMainFrameOnly: false)
@@ -198,33 +195,23 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
-        // Telemetry: record navigation finish
         Telemetry.shared.recordNavigationFinish(siteId: site.id, url: webView.url)
-        // Persist last visited in-site URL for this site so we can restore it on next launch
         if let u = webView.url, let host = u.host, SiteManager.hostMatches(host: host, siteHost: site.url.host) {
             UserDefaults.standard.set(u.absoluteString, forKey: "Vaaka.LastURL.\(site.id)")
         }
-        // Diagnostics removed: suppress navigator.userAgent logs in production
-        // Note: theme-color is now observed via KVO on WKWebView.themeColor property
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let nsErr = error as NSError
-        print("[WARN] navigation: didFailProvisionalNavigation for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") errorDomain=\(nsErr.domain) code=\(nsErr.code) desc=\(nsErr.localizedDescription) hidden=\(webView.isHidden)")
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
-        // Telemetry: record failure
         Telemetry.shared.recordNavigationFailure(siteId: site.id, url: webView.url, domain: nsErr.domain, code: nsErr.code, description: nsErr.localizedDescription)
-        // Notify UI so we can present a user-friendly message with Retry / Open externally options
         NotificationCenter.default.post(name: .SiteTabDidFailLoading, object: nil, userInfo: ["siteId": site.id, "url": webView.url?.absoluteString ?? "<no-url>", "errorDomain": nsErr.domain, "errorCode": nsErr.code, "errorDescription": nsErr.localizedDescription])
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         let nsErr = error as NSError
-        print("[WARN] navigation: didFail for site.id=\(site.id) url=\(webView.url?.absoluteString ?? "<no-url>") errorDomain=\(nsErr.domain) code=\(nsErr.code) desc=\(nsErr.localizedDescription) hidden=\(webView.isHidden)")
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
-        // Telemetry: record failure
         Telemetry.shared.recordNavigationFailure(siteId: site.id, url: webView.url, domain: nsErr.domain, code: nsErr.code, description: nsErr.localizedDescription)
-        // Notify UI so we can present a user-friendly message with Retry / Open externally options
         NotificationCenter.default.post(name: .SiteTabDidFailLoading, object: nil, userInfo: ["siteId": site.id, "url": webView.url?.absoluteString ?? "<no-url>", "errorDomain": nsErr.domain, "errorCode": nsErr.code, "errorDescription": nsErr.localizedDescription])
     }
 
@@ -244,21 +231,16 @@ private final class ErrorMessageHandler: NSObject, WKScriptMessageHandler {
                 guard let tab = SiteTabManager.shared.tabs.first(where: { $0.site.id == self.siteId }) else { return }
                 switch action {
                 case "retry":
-                    print("[INFO] ErrorMessageHandler: retry requested for site.id=\(self.siteId)")
-                    // Attempt to reload the start URL for this site
                     tab.webView.load(URLRequest(url: tab.site.url))
                     Telemetry.shared.recordUserAction(siteId: tab.site.id, action: "retry_from_error_page")
                 case "open":
-                    print("[INFO] ErrorMessageHandler: open in browser requested for site.id=\(self.siteId)")
                     NSWorkspace.shared.open(tab.site.url)
                     Telemetry.shared.recordUserAction(siteId: tab.site.id, action: "open_in_browser_from_error_page")
                 case "dismiss":
-                    print("[INFO] ErrorMessageHandler: dismiss requested for site.id=\(self.siteId)")
-                    // Clear to about:blank to dismiss the error UI
                     tab.webView.loadHTMLString("", baseURL: nil)
                     Telemetry.shared.recordUserAction(siteId: tab.site.id, action: "dismiss_error_page")
                 default:
-                    print("[WARN] ErrorMessageHandler: unknown action=\(action) for site.id=\(self.siteId)")
+                    break
                 }
             }
         }

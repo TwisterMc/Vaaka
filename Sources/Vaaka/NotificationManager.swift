@@ -1,41 +1,76 @@
 import Foundation
-import AppKit
+import UserNotifications
 
-class NotificationManager: NSObject {
+class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
+
+    private var center: UNUserNotificationCenter?
 
     private override init() {
         super.init()
     }
 
-    /// Request user permission for notifications (AppleScript doesn't require explicit permission)
-    func requestPermission(completion: @escaping (Bool) -> Void) {
-        // AppleScript notifications work without explicit permission request
-        DispatchQueue.main.async { completion(true) }
+    private func ensureCenter() {
+        guard center == nil else { return }
+        guard Thread.isMainThread else {
+            DispatchQueue.main.sync { self.ensureCenter() }
+            return
+        }
+        
+        // In a package/test context, notification center might not be available
+        // This is fine - notifications just won't work in that context
+        if Bundle.main.bundleIdentifier == nil {
+            print("[DEBUG] Running in package context, notifications not available")
+            return
+        }
+        
+        let c = UNUserNotificationCenter.current()
+        c.delegate = self
+        self.center = c
     }
 
-    /// Send a notification to the system using AppleScript
+    /// Request user permission for notifications
+    func requestPermission(completion: @escaping (Bool) -> Void) {
+        ensureCenter()
+        guard let center = center else {
+            completion(false)
+            return
+        }
+        
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error = error {
+                print("[ERROR] Notification permission request failed: \(error)")
+            }
+            DispatchQueue.main.async { completion(granted) }
+        }
+    }
+
+    /// Send a notification using UserNotifications framework
     func sendNotification(title: String, body: String, siteId: String) {
         // Check if notifications are globally enabled
         let globalEnabled = UserDefaults.standard.object(forKey: "Vaaka.NotificationsEnabledGlobal") == nil || UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal")
         guard globalEnabled else { return }
         
-        // Escape quotes in title and body
-        let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
-        let escapedBody = body.replacingOccurrences(of: "\"", with: "\\\"")
-        
-        // Use AppleScript to display notification - works on all macOS versions without special permissions
-        let script = """
-        display notification "\(escapedBody)" with title "\(escapedTitle)"
-        """
-        
-        if let appleScript = NSAppleScript(source: script) {
-            var error: NSDictionary?
-            appleScript.executeAndReturnError(&error)
-            if let error = error {
-                print("[ERROR] Failed to send notification: \(error)")
-            } else {
-                print("[DEBUG] Notification sent for site: \(siteId)")
+        // Check if notifications are enabled for this site
+        guard isEnabledForSite(siteId) else { return }
+
+        ensureCenter()
+        guard let center = center else { return }
+
+        DispatchQueue.main.async {
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+            content.threadIdentifier = siteId
+
+            let request = UNNotificationRequest(identifier: "vaaka.\(siteId).\(UUID().uuidString)", content: content, trigger: nil)
+            center.add(request) { error in
+                if let error = error {
+                    print("[ERROR] Failed to schedule notification: \(error)")
+                } else {
+                    print("[DEBUG] Notification sent for site: \(siteId)")
+                }
             }
         }
     }
@@ -53,5 +88,10 @@ class NotificationManager: NSObject {
         let defaults = UserDefaults.standard
         let key = "Vaaka.NotificationsEnabled.\(siteId)"
         defaults.set(enabled, forKey: key)
+    }
+
+    // Delegate: ensure notifications show while app is frontmost
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
 }
