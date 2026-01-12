@@ -55,10 +55,15 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // Only show the site domain column — name is derived automatically from the host
         let urlColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("url"))
         urlColumn.title = "Site"
-        urlColumn.width = 600
+        urlColumn.width = 200
         tableView.addTableColumn(urlColumn)
 
-        tableView.headerView = nil
+        let notifColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("notifications"))
+        notifColumn.title = "Notifications"
+        notifColumn.width = 100
+        tableView.addTableColumn(notifColumn)
+
+        tableView.headerView = NSTableHeaderView()
         tableView.delegate = self
         tableView.dataSource = self
         tableView.usesAutomaticRowHeights = true
@@ -383,6 +388,14 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         }
     }
 
+    @objc private func toggleSiteNotification(_ sender: NSButton) {
+        let row = sender.tag
+        guard row >= 0, row < SiteManager.shared.sites.count else { return }
+        let site = SiteManager.shared.sites[row]
+        let enabled = sender.state == .on
+        NotificationManager.shared.setEnabled(enabled, forSite: site.id)
+    }
+
     @objc private func refreshFavicons() {
         print("[DEBUG] Forcing favicon refresh for all sites")
         SiteManager.shared.refreshAllFavicons()
@@ -665,6 +678,9 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             let sites = SiteManager.shared.sites
             // If row is the trailing empty row, show placeholder for adding
             if row >= sites.count {
+                if tableColumn?.identifier.rawValue == "notifications" {
+                    return nil // No notifications checkbox for add row
+                }
                 let tf = NSTextField(string: "")
                 tf.placeholderString = ""
                 tf.isBordered = false
@@ -678,6 +694,15 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             }
 
             let site = sites[row]
+            
+            // Handle notifications column
+            if tableColumn?.identifier.rawValue == "notifications" {
+                let checkbox = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleSiteNotification(_:)))
+                checkbox.state = NotificationManager.shared.isEnabledForSite(site.id) ? .on : .off
+                checkbox.tag = row
+                return checkbox
+            }
+            
             // Single column table: show only the host (e.g. apple.com) to the user
             let hostStr = site.url.host ?? site.url.absoluteString
             let tf = NSTextField(string: hostStr)
