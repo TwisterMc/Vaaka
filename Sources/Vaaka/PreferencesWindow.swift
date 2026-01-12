@@ -254,7 +254,12 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         enableNotifications.state = UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal") ? .on : .off
         enableNotifications.toolTip = "Allow websites to send system notifications"
 
-        let generalStack = NSStackView(views: [generalHeader, darkModeRow, enableNotifications])
+        // Favicon refresh button
+        let refreshFaviconsButton = NSButton(title: "Refresh Favicons", target: self, action: #selector(refreshFavicons))
+        refreshFaviconsButton.bezelStyle = .rounded
+        refreshFaviconsButton.toolTip = "Fetch fresh favicons for all sites"
+
+        let generalStack = NSStackView(views: [generalHeader, darkModeRow, enableNotifications, refreshFaviconsButton])
         generalStack.orientation = .vertical
         generalStack.alignment = .leading
         generalStack.spacing = 10
@@ -372,6 +377,11 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
                 }
             }
         }
+    }
+
+    @objc private func refreshFavicons() {
+        print("[DEBUG] Forcing favicon refresh for all sites")
+        SiteManager.shared.refreshAllFavicons()
     }
 
     @objc private func darkModeChanged(_ sender: NSPopUpButton) {

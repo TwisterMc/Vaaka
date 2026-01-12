@@ -27,6 +27,13 @@ class FaviconFetcher {
             urls.append(URL(string: "https://www.\(host)/apple-touch-icon.png")!)
             urls.append(URL(string: "https://\(host)/apple-touch-icon-precomposed.png")!)
             urls.append(URL(string: "https://www.\(host)/apple-touch-icon-precomposed.png")!)
+            
+            // Google-specific favicon endpoints (calendar, workspace, etc)
+            if host.contains("google.com") || host.contains("workspace.google.com") {
+                urls.append(URL(string: "https://workspace.google.com/lp/static/images/favicon.ico")!)
+                urls.append(URL(string: "https://fonts.gstatic.com/s/i/productlogos/calendar_2020q4/v13/192px.svg")!)
+            }
+            
             urls.append(URL(string: "https://\(host)/favicon.ico")!)
             urls.append(URL(string: "https://www.\(host)/favicon.ico")!)
             
@@ -44,11 +51,22 @@ class FaviconFetcher {
         req.timeoutInterval = 5.0  // Add timeout to avoid hanging
         let task = session.dataTask(with: req) { data, resp, err in
             if let d = data, let img = NSImage(data: d) {
-                // Check image size - skip very small/pixelated images (< 32x32)
+                // Prefer larger icons (64x64+) for Retina displays, minimum 32x32
                 let size = img.size
-                if size.width >= 32 && size.height >= 32 {
+                let minSize: CGFloat = 64  // Prefer 2x size for crisp display on Retina
+                
+                // Accept this image if it meets minimum quality
+                if size.width >= minSize && size.height >= minSize {
                     completion(img)
                     return
+                }
+                // If smaller than preferred but >= 32x32, continue searching but keep as fallback
+                if size.width >= 32 && size.height >= 32 {
+                    // Check if there are more candidates - if not, use this one
+                    if remaining.count <= 1 {
+                        completion(img)
+                        return
+                    }
                 }
             }
             remaining.removeFirst()
@@ -112,19 +130,19 @@ class FaviconFetcher {
             var priority = 0
             let lowerHref = href.lowercased()
             
-            // SVG is highest priority (scalable)
+            // SVG is highest priority (infinitely scalable, always crisp)
             if lowerHref.contains(".svg") {
+                priority = 10000
+            }
+            // Apple touch icons are usually large (180x180+)
+            else if rel.contains("apple") {
                 priority = 1000
             }
-            // Apple touch icons are usually large
-            else if rel.contains("apple") {
+            // PNG is better than ICO for larger sizes
+            else if lowerHref.contains(".png") {
                 priority = 500
             }
-            // PNG is better than ICO
-            else if lowerHref.contains(".png") {
-                priority = 300
-            }
-            // Extract size hint if present
+            // Extract size hint if present and boost priority for larger icons
             let sizePattern = "sizes=[\'\"]?([^\"'>]+)[\"']?"
             if let sizeRegex = try? NSRegularExpression(pattern: sizePattern, options: [.caseInsensitive]),
                let sizeMatch = sizeRegex.firstMatch(in: linkTag, options: [], range: NSRange(location: 0, length: linkTag.count)) {
@@ -132,9 +150,10 @@ class FaviconFetcher {
                 let sizeStr = (linkTag as NSString).substring(with: sizeRange)
                 // Parse size hints like "192x192" or "any"
                 if sizeStr == "any" {
-                    priority += 200
+                    priority += 500  // "any" usually means SVG
                 } else if let size = Int(sizeStr.split(separator: "x").first ?? "") {
-                    priority += min(size / 16, 100)  // Scale down large sizes
+                    // Heavily favor larger icons for Retina displays
+                    priority += size  // Direct size bonus (192x192 gets +192, etc.)
                 }
             }
             
