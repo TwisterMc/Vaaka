@@ -102,12 +102,20 @@ class FaviconFetcher {
 
     // Load a bundled or cached resource image by resource name (e.g., "github.svg" or "site.png").
     func image(forResource name: String) -> NSImage? {
-        if let cached = cache.object(forKey: name as NSString) { return cached }
+        if let cached = cache.object(forKey: name as NSString) {
+            return cached
+        }
           // Try asset in app bundle first
-          if let img = NSImage(named: NSImage.Name(name)) { cache.setObject(img, forKey: name as NSString); return img }
+          if let img = NSImage(named: NSImage.Name(name)) {
+              cache.setObject(img, forKey: name as NSString)
+              return img
+          }
           if let url = Bundle.main.url(forResource: name, withExtension: nil),
               let data = try? Data(contentsOf: url),
-              let img = NSImage(data: data) { cache.setObject(img, forKey: name as NSString); return img }
+              let img = NSImage(data: data) {
+              cache.setObject(img, forKey: name as NSString)
+              return img
+          }
         // Fallback to looking in SwiftPM module resources without touching Bundle.module
         if let base = Bundle.main.resourceURL {
             let modFile = base.appendingPathComponent("Vaaka_Vaaka.bundle").appendingPathComponent(name)
@@ -167,20 +175,35 @@ class FaviconFetcher {
             }
             // Move into place (atomic)
             try FileManager.default.moveItem(at: temp, to: final)
-            // Log size
-            let size = (try? FileManager.default.attributesOfItem(atPath: final.path)[.size]) as? UInt64 ?? 0
-            print("[DEBUG] saveImage: wrote favicon for site=\(siteID) path=\(final.path) size=\(size)")
             // Update cache with the newly saved image
             if let savedImage = NSImage(data: data) {
                 cache.setObject(savedImage, forKey: fname as NSString)
             }
             return fname
         } catch {
-            print("[DEBUG] Failed to save favicon for \(siteID): \(error)")
             try? FileManager.default.removeItem(at: temp)
             return nil
         }
     }
+    /// Load favicon from disk, or fetch from web if not found on disk
+    /// This is more resilient to permission issues since it falls back to fetching
+    func imageOrFetchFromWeb(forResource name: String, url: URL, completion: @escaping (NSImage?) -> Void) {
+        // First try to load from disk
+        if let img = image(forResource: name) {
+            completion(img)
+            return
+        }
+        
+        // Fall back to fetching from web
+        fetchFavicon(for: url) { img in
+            if let img = img {
+                // Cache in memory even if we couldn't save to disk
+                self.cache.setObject(img, forKey: name as NSString)
+            }
+            completion(img)
+        }
+    }
+
     // Generate a simple mono icon with the first character of the canonical host (strip www.)
     func generateMonoIcon(for host: String) -> NSImage? {
         let canonical = SiteManager.canonicalHost(host) ?? host.lowercased()

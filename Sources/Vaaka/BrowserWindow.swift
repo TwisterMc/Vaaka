@@ -589,8 +589,22 @@ class BrowserWindowController: NSWindowController {
             // Use instance methods for image/visibility updates (no noisy prints)
 
             // Load favicon (SVG preferred, PNG allowed, generated fallback)
-            if let name = site.favicon, let img = FaviconFetcher.shared.image(forResource: name) {
-                self.applyImage(img, reason: "setup:loaded-resource:\(name)")
+            if let name = site.favicon {
+                // Try to load from disk, or fetch from web as fallback
+                FaviconFetcher.shared.imageOrFetchFromWeb(forResource: name, url: site.url) { [weak self] img in
+                    guard let self = self else { return }
+                    if let img = img {
+                        DispatchQueue.main.async {
+                            self.applyImage(img, reason: "setup:loaded-resource:\(name)")
+                        }
+                    } else if let host = site.url.host {
+                        // Fallback to generated mono icon
+                        let mono = FaviconFetcher.shared.generateMonoIcon(for: host)
+                        DispatchQueue.main.async {
+                            self.applyImage(mono, reason: "setup:generated-mono")
+                        }
+                    }
+                }
             } else if let host = site.url.host {
                 let mono = FaviconFetcher.shared.generateMonoIcon(for: host)
                 self.applyImage(mono, reason: "setup:generated-mono")
