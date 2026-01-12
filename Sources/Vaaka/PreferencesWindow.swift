@@ -11,7 +11,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     private var splitStack: NSStackView?
     // Sidebar source-list
     private var sidebarTable: NSTableView?
-    private let sidebarItems = ["General", "Appearance", "Privacy"]
+    private let sidebarItems = ["Sites", "General", "Privacy"]
     // Remote update helper UI
     private var remoteStatusLabel: NSTextField?
     private var importEasyButton: NSButton?
@@ -91,11 +91,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         sendDNT.state = UserDefaults.standard.bool(forKey: "Vaaka.SendDNT") ? .on : .off
         sendDNT.toolTip = "Send DNT: 1 for top-level page loads when enabled"
 
-        // Notifications
-        let enableNotifications = NSButton(checkboxWithTitle: "Enable website notifications", target: self, action: #selector(toggleNotifications(_:)))
-        let defaultNotificationsEnabled = UserDefaults.standard.object(forKey: "Vaaka.NotificationsEnabledGlobal") == nil || UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal")
-        enableNotifications.state = defaultNotificationsEnabled ? .on : .off
-        enableNotifications.toolTip = "Allow websites to send system notifications"
+        // Notifications moved to General pane
 
         // Warning label (place near bottom)
         let warningLabel = NSTextField(labelWithString: "Note: This app doesn't work with all sites due to their security standards (e.g., Slack).")
@@ -162,19 +158,19 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // Select first row by default (General)
         DispatchQueue.main.async { sidebarTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }
 
-        // General pane
-        let generalPane = NSView()
-        generalPane.translatesAutoresizingMaskIntoConstraints = false
+        // Sites pane (formerly General)
+        let sitesPane = NSView()
+        sitesPane.translatesAutoresizingMaskIntoConstraints = false
         let sitesStack = NSStackView(views: [header, hintLabel, tableContainer, controls])
         sitesStack.orientation = .vertical
         sitesStack.spacing = 8
         sitesStack.translatesAutoresizingMaskIntoConstraints = false
-        generalPane.addSubview(sitesStack)
+        sitesPane.addSubview(sitesStack)
         NSLayoutConstraint.activate([
-            sitesStack.leadingAnchor.constraint(equalTo: generalPane.leadingAnchor, constant: 12),
-            sitesStack.trailingAnchor.constraint(equalTo: generalPane.trailingAnchor, constant: -12),
-            sitesStack.topAnchor.constraint(equalTo: generalPane.topAnchor, constant: 12),
-            sitesStack.bottomAnchor.constraint(equalTo: generalPane.bottomAnchor, constant: -12)
+            sitesStack.leadingAnchor.constraint(equalTo: sitesPane.leadingAnchor, constant: 12),
+            sitesStack.trailingAnchor.constraint(equalTo: sitesPane.trailingAnchor, constant: -12),
+            sitesStack.topAnchor.constraint(equalTo: sitesPane.topAnchor, constant: 12),
+            sitesStack.bottomAnchor.constraint(equalTo: sitesPane.bottomAnchor, constant: -12)
         ])
 
         // Privacy pane
@@ -207,7 +203,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // Accessibility
         // (No custom URL or updateNow — EasyList only)
 
-        let privacyStack = NSStackView(views: [privacyHeader, blockTrackers, sendDNT, enableNotifications, urlRow])
+        let privacyStack = NSStackView(views: [privacyHeader, blockTrackers, sendDNT, urlRow])
         privacyStack.orientation = .vertical
         privacyStack.alignment = .leading
         privacyStack.spacing = 10
@@ -235,13 +231,13 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         self.splitStack = splitStack
 
         // Put general pane into the detail container and add privacyPane as hidden child
-        // Appearance pane
-        let appearancePane = NSView()
-        appearancePane.translatesAutoresizingMaskIntoConstraints = false
-        let appearanceHeader = NSTextField(labelWithString: "Appearance")
-        appearanceHeader.font = NSFont.boldSystemFont(ofSize: 13)
-        appearanceHeader.textColor = NSColor.labelColor
-        appearanceHeader.alignment = .left
+        // General pane (formerly Appearance)
+        let generalPane = NSView()
+        generalPane.translatesAutoresizingMaskIntoConstraints = false
+        let generalHeader = NSTextField(labelWithString: "General")
+        generalHeader.font = NSFont.boldSystemFont(ofSize: 13)
+        generalHeader.textColor = NSColor.labelColor
+        generalHeader.alignment = .left
 
         // Dark mode controls
         let darkModeLabel = NSTextField(labelWithString: "Dark Mode:")
@@ -260,39 +256,47 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         darkModeRow.alignment = .centerY
         darkModeLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        let appearanceStack = NSStackView(views: [appearanceHeader, darkModeRow])
-        appearanceStack.orientation = .vertical
-        appearanceStack.alignment = .leading
-        appearanceStack.spacing = 10
-        appearanceStack.translatesAutoresizingMaskIntoConstraints = false
-        appearancePane.addSubview(appearanceStack)
+        // Notifications
+        let enableNotifications = NSButton(checkboxWithTitle: "Enable website notifications", target: self, action: #selector(toggleNotifications(_:)))
+        enableNotifications.state = UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal") ? .on : .off
+        enableNotifications.toolTip = "Allow websites to send system notifications"
+
+        let generalStack = NSStackView(views: [generalHeader, darkModeRow, enableNotifications])
+        generalStack.orientation = .vertical
+        generalStack.alignment = .leading
+        generalStack.spacing = 10
+        generalStack.translatesAutoresizingMaskIntoConstraints = false
+        generalPane.addSubview(generalStack)
         NSLayoutConstraint.activate([
-            appearanceStack.leadingAnchor.constraint(equalTo: appearancePane.leadingAnchor, constant: 12),
-            appearanceStack.trailingAnchor.constraint(equalTo: appearancePane.trailingAnchor, constant: -12),
-            appearanceStack.topAnchor.constraint(equalTo: appearancePane.topAnchor, constant: 12),
-            appearanceStack.bottomAnchor.constraint(equalTo: appearancePane.bottomAnchor, constant: -12)
+            generalStack.leadingAnchor.constraint(equalTo: generalPane.leadingAnchor, constant: 12),
+            generalStack.trailingAnchor.constraint(equalTo: generalPane.trailingAnchor, constant: -12),
+            generalStack.topAnchor.constraint(equalTo: generalPane.topAnchor, constant: 12),
+            generalStack.bottomAnchor.constraint(equalTo: generalPane.bottomAnchor, constant: -12)
         ])
 
+        detailContainer.addSubview(sitesPane)
         detailContainer.addSubview(generalPane)
-        detailContainer.addSubview(appearancePane)
         detailContainer.addSubview(privacyPane)
         privacyPane.isHidden = true
-        appearancePane.isHidden = true
+        generalPane.isHidden = true
+        sitesPane.translatesAutoresizingMaskIntoConstraints = false
         generalPane.translatesAutoresizingMaskIntoConstraints = false
-        appearancePane.translatesAutoresizingMaskIntoConstraints = false
         privacyPane.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
+            sitesPane.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
+            sitesPane.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
+            sitesPane.topAnchor.constraint(equalTo: detailContainer.topAnchor),
+            sitesPane.bottomAnchor.constraint(equalTo: detailContainer.bottomAnchor),
+
             generalPane.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
             generalPane.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
             generalPane.topAnchor.constraint(equalTo: detailContainer.topAnchor),
-
-            appearancePane.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
-            appearancePane.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
-            appearancePane.topAnchor.constraint(equalTo: detailContainer.topAnchor),
+            generalPane.bottomAnchor.constraint(equalTo: detailContainer.bottomAnchor),
 
             privacyPane.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
             privacyPane.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
-            privacyPane.topAnchor.constraint(equalTo: detailContainer.topAnchor)
+            privacyPane.topAnchor.constraint(equalTo: detailContainer.topAnchor),
+            privacyPane.bottomAnchor.constraint(equalTo: detailContainer.bottomAnchor)
         ])
 
         // Sidebar width
@@ -325,7 +329,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
 
         // Keep references for swapping
         self.generalPane = generalPane
-        self.appearancePane = appearancePane
+        self.appearancePane = sitesPane
         self.privacyPane = privacyPane
         self.detailPane = generalPane
 
@@ -389,6 +393,8 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             }
         }
     }
+
+    @objc private func darkModeChanged(_ sender: NSPopUpButton) {
         let selectedIndex = sender.indexOfSelectedItem
         let preference: AppearanceManager.DarkModePreference
         switch selectedIndex {
@@ -446,15 +452,15 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     }
 
     // MARK: - Settings-style sidebar helpers
-    private enum PrefPane { case general, appearance, privacy }
+    private enum PrefPane { case sites, general, privacy }
 
     @objc private func sidebarTableClicked(_ sender: Any?) {
         guard let tv = sidebarTable else { return }
         let row = tv.selectedRow
         if row >= 0 && row < sidebarItems.count {
             switch row {
-            case 0: selectPane(.general)
-            case 1: selectPane(.appearance)
+            case 0: selectPane(.sites)
+            case 1: selectPane(.general)
             default: selectPane(.privacy)
             }
         }
@@ -463,14 +469,14 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     private func selectPane(_ pane: PrefPane) {
         // Toggle visibility of panes and update sidebar selection
         switch pane {
+        case .sites:
+            generalPane?.isHidden = true
+            appearancePane?.isHidden = false  // appearancePane stores sitesPane
+            privacyPane?.isHidden = true
+            sidebarTable?.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         case .general:
             generalPane?.isHidden = false
             appearancePane?.isHidden = true
-            privacyPane?.isHidden = true
-            sidebarTable?.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        case .appearance:
-            generalPane?.isHidden = true
-            appearancePane?.isHidden = false
             privacyPane?.isHidden = true
             sidebarTable?.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
         case .privacy:
@@ -480,8 +486,8 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             sidebarTable?.selectRowIndexes(IndexSet(integer: 2), byExtendingSelection: false)
         }
         switch pane {
+        case .sites: detailPane = appearancePane  // appearancePane stores sitesPane
         case .general: detailPane = generalPane
-        case .appearance: detailPane = appearancePane
         case .privacy: detailPane = privacyPane
         }
     }
@@ -516,7 +522,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             }
         } else if tv == self.sidebarTable {
             let row = sidebarTable?.selectedRow ?? -1
-            if row == 0 { selectPane(.general) } else if row == 1 { selectPane(.appearance) } else if row == 2 { selectPane(.privacy) }
+            if row == 0 { selectPane(.sites) } else if row == 1 { selectPane(.general) } else if row == 2 { selectPane(.privacy) }
         }
     }
 

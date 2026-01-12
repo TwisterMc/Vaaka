@@ -1,51 +1,41 @@
 import Foundation
-import UserNotifications
+import AppKit
 
-class NotificationManager {
+class NotificationManager: NSObject {
     static let shared = NotificationManager()
 
-    private override init() {}
-
-    /// Request user permission for notifications
-    func requestPermission(completion: @escaping (Bool) -> Void) {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            if let error = error {
-                print("[ERROR] Notification permission request failed: \(error)")
-            }
-            DispatchQueue.main.async {
-                completion(granted)
-            }
-        }
+    private override init() {
+        super.init()
     }
 
-    /// Send a notification to the system
+    /// Request user permission for notifications (AppleScript doesn't require explicit permission)
+    func requestPermission(completion: @escaping (Bool) -> Void) {
+        // AppleScript notifications work without explicit permission request
+        DispatchQueue.main.async { completion(true) }
+    }
+
+    /// Send a notification to the system using AppleScript
     func sendNotification(title: String, body: String, siteId: String) {
         // Check if notifications are globally enabled
         let globalEnabled = UserDefaults.standard.object(forKey: "Vaaka.NotificationsEnabledGlobal") == nil || UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal")
         guard globalEnabled else { return }
         
-        // Check if user has granted permission
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            guard settings.authorizationStatus == .authorized else {
-                print("[DEBUG] Notifications not authorized by user")
-                return
-            }
-
-            let content = UNMutableNotificationContent()
-            content.title = title
-            content.body = body
-            content.sound = .default
-            content.badge = NSNumber(value: UIApplication.shared.applicationIconBadgeNumber + 1)
-            // Add custom data so we can identify which site this came from
-            content.userInfo = ["siteId": siteId]
-
-            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-            UNUserNotificationCenter.current().add(request) { error in
-                if let error = error {
-                    print("[ERROR] Failed to send notification: \(error)")
-                } else {
-                    print("[DEBUG] Notification sent for site: \(siteId)")
-                }
+        // Escape quotes in title and body
+        let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedBody = body.replacingOccurrences(of: "\"", with: "\\\"")
+        
+        // Use AppleScript to display notification - works on all macOS versions without special permissions
+        let script = """
+        display notification "\(escapedBody)" with title "\(escapedTitle)"
+        """
+        
+        if let appleScript = NSAppleScript(source: script) {
+            var error: NSDictionary?
+            appleScript.executeAndReturnError(&error)
+            if let error = error {
+                print("[ERROR] Failed to send notification: \(error)")
+            } else {
+                print("[DEBUG] Notification sent for site: \(siteId)")
             }
         }
     }
