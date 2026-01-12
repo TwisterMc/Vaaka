@@ -271,21 +271,19 @@ private final class SelfUIDelegate: NSObject, WKUIDelegate {
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard let url = navigationAction.request.url else { return nil }
-        // Ignore about/data/blob requests here — they are internal
+        
+        // Ignore special schemes (data, blob, about)
         if let scheme = url.scheme?.lowercased(), scheme == "data" || scheme == "blob" || scheme == "about" || url.absoluteString.hasPrefix("about:") {
-            // Let the existing webview handle it if needed
             return nil
         }
+        
+        // If same site, load in current window instead of opening new window/tab
         if SiteManager.shared.site(for: url) == site {
-            // load in existing webview (no new window)
             webView.load(URLRequest(url: url))
             return nil
         }
-        // Open external URLs in default browser and do not create new WebViews
-        let abs = url.absoluteString
-        if let sch = url.scheme?.lowercased(), sch == "data" || sch == "blob" || sch == "about" || abs.hasPrefix("about:") {
-            return nil
-        }
+        
+        // For external URLs, open in default browser instead of new window
         NSWorkspace.shared.open(url)
         return nil
     }
