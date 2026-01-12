@@ -8,8 +8,18 @@ class FaviconFetcher {
     private let session: URLSession
     private let cache = NSCache<NSString, NSImage>()
 
-    init(session: URLSession = URLSession(configuration: .ephemeral)) {
-        self.session = session
+    init(session: URLSession? = nil) {
+        if let s = session {
+            self.session = s
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 10
+            config.timeoutIntervalForResource = 20
+            config.httpMaximumConnectionsPerHost = 4
+            config.requestCachePolicy = .reloadIgnoringLocalCacheData
+            config.urlCache = nil
+            self.session = URLSession(configuration: config)
+        }
     }
 
     // NOTE: The spec requires that favicons are fetched and managed in Settings
@@ -22,11 +32,18 @@ class FaviconFetcher {
         discoverIconCandidates(baseURL: url) { candidates in
             var urls = candidates
             
+            // Determine if we should try www-prefixed versions
+            let wwwHost = host.hasPrefix("www.") ? nil : "www.\(host)"
+            
             // Append well-known fallback paths, prioritizing larger sizes
             urls.append(URL(string: "https://\(host)/apple-touch-icon.png")!)
-            urls.append(URL(string: "https://www.\(host)/apple-touch-icon.png")!)
+            if let wHost = wwwHost {
+                urls.append(URL(string: "https://\(wHost)/apple-touch-icon.png")!)
+            }
             urls.append(URL(string: "https://\(host)/apple-touch-icon-precomposed.png")!)
-            urls.append(URL(string: "https://www.\(host)/apple-touch-icon-precomposed.png")!)
+            if let wHost = wwwHost {
+                urls.append(URL(string: "https://\(wHost)/apple-touch-icon-precomposed.png")!)
+            }
             
             // Google-specific favicon endpoints (calendar, workspace, etc)
             if host.contains("google.com") || host.contains("workspace.google.com") {
@@ -35,7 +52,9 @@ class FaviconFetcher {
             }
             
             urls.append(URL(string: "https://\(host)/favicon.ico")!)
-            urls.append(URL(string: "https://www.\(host)/favicon.ico")!)
+            if let wHost = wwwHost {
+                urls.append(URL(string: "https://\(wHost)/favicon.ico")!)
+            }
             
             self.fetchFromCandidateURLs(urls, completion: completion)
         }
