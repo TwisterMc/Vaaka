@@ -21,9 +21,15 @@ class FaviconFetcher {
         // First try to discover icons from the page's HTML (link rel icons), then fallback to common /favicon.ico paths.
         discoverIconCandidates(baseURL: url) { candidates in
             var urls = candidates
-            // Append well-known fallbacks
+            
+            // Append well-known fallback paths, prioritizing larger sizes
+            urls.append(URL(string: "https://\(host)/apple-touch-icon.png")!)
+            urls.append(URL(string: "https://www.\(host)/apple-touch-icon.png")!)
+            urls.append(URL(string: "https://\(host)/apple-touch-icon-precomposed.png")!)
+            urls.append(URL(string: "https://www.\(host)/apple-touch-icon-precomposed.png")!)
             urls.append(URL(string: "https://\(host)/favicon.ico")!)
             urls.append(URL(string: "https://www.\(host)/favicon.ico")!)
+            
             self.fetchFromCandidateURLs(urls, completion: completion)
         }
     }
@@ -35,13 +41,18 @@ class FaviconFetcher {
         // Send a Safari-like User-Agent and accept images
         req.setValue(UserAgent.safari, forHTTPHeaderField: "User-Agent")
         req.setValue("image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        req.timeoutInterval = 5.0  // Add timeout to avoid hanging
         let task = session.dataTask(with: req) { data, resp, err in
             if let d = data, let img = NSImage(data: d) {
-                completion(img)
-            } else {
-                remaining.removeFirst()
-                self.fetchFromCandidateURLs(remaining, completion: completion)
+                // Check image size - skip very small/pixelated images (< 32x32)
+                let size = img.size
+                if size.width >= 32 && size.height >= 32 {
+                    completion(img)
+                    return
+                }
             }
+            remaining.removeFirst()
+            self.fetchFromCandidateURLs(remaining, completion: completion)
         }
         task.resume()
     }
@@ -62,33 +73,86 @@ class FaviconFetcher {
     }
 
     private func parseIconLinks(fromHTML html: String, baseURL: URL) -> [URL] {
-        // Very small, pragmatic HTML parsing via regex to extract <link rel="...icon..." href="..."> candidates.
-        // This avoids adding a heavy HTML parser dependency for a simple use case.
-        var results: [URL] = []
-        let pattern = "<link[^>]+rel=[\'\"]?([^\"'>]+)[\"']?[^>]*href=[\'\"]([^\"'>]+)[\"']?[^>]*>"
+        // Extract <link> tags for icons and prioritize by size/type
+        var results: [(url: URL, priority: Int)] = []
+        
+        // Match <link ...> tags
+        let pattern = "<link[^>]*>"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
         let ns = html as NSString
         let matches = regex.matches(in: html, options: [], range: NSRange(location: 0, length: ns.length))
-        for m in matches {
-            if m.numberOfRanges >= 3 {
-                let rel = ns.substring(with: m.range(at: 1)).lowercased()
-                let href = ns.substring(with: m.range(at: 2))
-                if rel.contains("icon") || rel.contains("shortcut") || rel.contains("apple-touch-icon") {
-                    if let resolved = URL(string: href, relativeTo: baseURL)?.absoluteURL {
-                        results.append(resolved)
-                    }
+        
+        for match in matches {
+            let linkTag = ns.substring(with: match.range)
+            
+            // Check if this is an icon link
+            guard linkTag.lowercased().contains("rel=") else { continue }
+            let relPattern = "rel=[\'\"]?([^\"'>]+)[\"']?"
+            guard let relRegex = try? NSRegularExpression(pattern: relPattern, options: [.caseInsensitive]),
+                  let relMatch = relRegex.firstMatch(in: linkTag, options: [], range: NSRange(location: 0, length: linkTag.count)) else { continue }
+            
+            let relRange = relMatch.range(at: 1)
+            let rel = (linkTag as NSString).substring(with: relRange).lowercased()
+            
+            if !rel.contains("icon") && !rel.contains("shortcut") && !rel.contains("apple") {
+                continue
+            }
+            
+            // Extract href
+            let hrefPattern = "href=[\'\"]?([^\"'>]+)[\"']?"
+            guard let hrefRegex = try? NSRegularExpression(pattern: hrefPattern, options: [.caseInsensitive]),
+                  let hrefMatch = hrefRegex.firstMatch(in: linkTag, options: [], range: NSRange(location: 0, length: linkTag.count)) else { continue }
+            
+            let hrefRange = hrefMatch.range(at: 1)
+            let href = (linkTag as NSString).substring(with: hrefRange)
+            
+            guard let resolved = URL(string: href, relativeTo: baseURL)?.absoluteURL else { continue }
+            
+            // Prioritize by type and size
+            var priority = 0
+            let lowerHref = href.lowercased()
+            
+            // SVG is highest priority (scalable)
+            if lowerHref.contains(".svg") {
+                priority = 1000
+            }
+            // Apple touch icons are usually large
+            else if rel.contains("apple") {
+                priority = 500
+            }
+            // PNG is better than ICO
+            else if lowerHref.contains(".png") {
+                priority = 300
+            }
+            // Extract size hint if present
+            let sizePattern = "sizes=[\'\"]?([^\"'>]+)[\"']?"
+            if let sizeRegex = try? NSRegularExpression(pattern: sizePattern, options: [.caseInsensitive]),
+               let sizeMatch = sizeRegex.firstMatch(in: linkTag, options: [], range: NSRange(location: 0, length: linkTag.count)) {
+                let sizeRange = sizeMatch.range(at: 1)
+                let sizeStr = (linkTag as NSString).substring(with: sizeRange)
+                // Parse size hints like "192x192" or "any"
+                if sizeStr == "any" {
+                    priority += 200
+                } else if let size = Int(sizeStr.split(separator: "x").first ?? "") {
+                    priority += min(size / 16, 100)  // Scale down large sizes
                 }
             }
+            
+            results.append((url: resolved, priority: priority))
         }
-        // Deduplicate, preserving order
+        
+        // Sort by priority descending, deduplicate, and return URLs
+        results.sort { $0.priority > $1.priority }
         var seen = Set<String>()
-        results = results.filter { url in
+        var finalURLs: [URL] = []
+        for (url, _) in results {
             let s = url.absoluteString
-            if seen.contains(s) { return false }
-            seen.insert(s)
-            return true
+            if !seen.contains(s) {
+                seen.insert(s)
+                finalURLs.append(url)
+            }
         }
-        return results
+        return finalURLs
     }
 
     // Directory where saved favicons are stored (Application Support/Vaaka/favicons)

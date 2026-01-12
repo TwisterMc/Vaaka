@@ -183,6 +183,8 @@ final class SiteManager {
     }
 
     private var fetchingSiteIDs: Set<String> = []
+    private let lastFaviconRefreshKey = "Vaaka.LastFaviconRefresh"
+    private let faviconRefreshIntervalSeconds: TimeInterval = 86400 * 7  // 7 days
 
     private func fetchMissingFaviconsIfNeeded(for newSites: [Site]) {
         for site in newSites where site.favicon == nil {
@@ -209,5 +211,44 @@ final class SiteManager {
                 }
             }
         }
+    }
+
+    /// Refresh favicons for all sites if enough time has passed since last refresh
+    func refreshFaviconsIfNeeded() {
+        let lastRefresh = UserDefaults.standard.double(forKey: lastFaviconRefreshKey)
+        let now = Date().timeIntervalSince1970
+        
+        // Only refresh if 7 days have passed since last refresh
+        if lastRefresh == 0 || (now - lastRefresh) >= faviconRefreshIntervalSeconds {
+            refreshAllFavicons()
+        }
+    }
+
+    /// Force refresh favicons for all sites
+    func refreshAllFavicons() {
+        for site in sites {
+            guard !fetchingSiteIDs.contains(site.id) else { continue }
+            fetchingSiteIDs.insert(site.id)
+
+            FaviconFetcher.shared.fetchFavicon(for: site.url) { img in
+                defer { self.fetchingSiteIDs.remove(site.id) }
+                guard let img = img else {
+                    return
+                }
+                if let filename = FaviconFetcher.shared.saveImage(img, forSiteID: site.id) {
+                    DispatchQueue.main.async {
+                        var s = self.sites
+                        if let idx = s.firstIndex(where: { $0.id == site.id }) {
+                            // Update even if the filename is the same (forces re-fetch)
+                            s[idx] = Site(id: s[idx].id, name: s[idx].name, url: s[idx].url, favicon: filename)
+                            self.replaceSites(s)
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Update last refresh time
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastFaviconRefreshKey)
     }
 }

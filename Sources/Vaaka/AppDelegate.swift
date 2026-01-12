@@ -8,6 +8,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Ensure sites are loaded from settings (bundled or persisted)
         SiteManager.shared.loadSites()
 
+        // Refresh favicons periodically (every 7 days)
+        SiteManager.shared.refreshFaviconsIfNeeded()
+
         // Create main browser window
         windowController = BrowserWindowController()
         // Restore frame before showing the window so it appears with the correct size
