@@ -22,5 +22,11 @@ if [ -d "$BIN_DIR/Vaaka_Vaaka.bundle" ]; then
 else
 	echo "⚠️ SwiftPM bundle not found at $BIN_DIR/Vaaka_Vaaka.bundle"
 fi
+
+# Code sign the app
+echo "Signing app..."
+codesign --force --deep --sign - "$OUT_APP"
+echo "✓ App signed with ad-hoc signature"
+
 # Print result
 echo "Packaged app at: $OUT_APP"

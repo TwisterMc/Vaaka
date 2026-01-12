@@ -87,6 +87,14 @@ jobs:
 
           echo "✓ Packaged: $OUT_APP"
 
+      - name: Sign app bundle
+        if: steps.check.outputs.skipping == 'false'
+        run: |
+          echo "Signing app..."
+          codesign --force --deep --sign - ./build/Vaaka.app
+          echo "✓ App signed with ad-hoc signature"
+          codesign -dv ./build/Vaaka.app
+
       - name: Create distribution zip
         if: steps.check.outputs.skipping == 'false'
         run: |
