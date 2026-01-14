@@ -78,7 +78,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 
     @objc func openHelp(_ sender: Any?) {
-        if let url = URL(string: "https://example.com/help") { NSWorkspace.shared.open(url) }
+        if let url = URL(string: "https://github.com/TwisterMc/Vaaka") { NSWorkspace.shared.open(url) }
+    }
+
+    @objc func openDonate(_ sender: Any?) {
+        if let url = URL(string: "https://ko-fi.com/twistermc") { NSWorkspace.shared.open(url) }
     }
 
     @objc func openPreferences(_ sender: Any?) {
@@ -103,6 +107,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "About \(appName)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Preferences...", action: #selector(openPreferences(_:)), keyEquivalent: ",")
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Donate", action: #selector(openDonate(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
