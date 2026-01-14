@@ -34,6 +34,7 @@ The idea came from the Fluid app from back in the day, where I could whiltelist 
 - **Local Data Storage** - All data is stored locally; no telemetry collected
 - **Notifications** - Native macOS notifications for web alerts (Disabled until signed)
 - **Unread Badge Counts** - Visual indicators for unread messages on supported sites
+- **Tab Overview** - Hover over tabs to see a snapshot preview of the site
 
 ## Installation
 

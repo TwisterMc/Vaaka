@@ -209,6 +209,18 @@ class BrowserWindowController: NSWindowController {
             item.heightAnchor.constraint(equalToConstant: 44).isActive = true
             item.widthAnchor.constraint(equalToConstant: railWidth).isActive = true
         }
+        
+        // Add spacer to push overview button to bottom
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        railStackView.addArrangedSubview(spacer)
+        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        
+        // Add Tab Overview button at bottom
+        let overviewButton = TabOverviewButton(actionTarget: self)
+        railStackView.addArrangedSubview(overviewButton)
+        overviewButton.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        overviewButton.widthAnchor.constraint(equalToConstant: railWidth).isActive = true
     }
 
     private func updateRailSelection(activeIndex: Int) {
@@ -374,6 +386,12 @@ class BrowserWindowController: NSWindowController {
 
     // MARK: - Keyboard handling
     private func handleKeyEvent(_ evt: NSEvent) -> NSEvent? {
+        // Cmd+T for Tab Overview
+        if evt.modifierFlags.contains(.command) && evt.charactersIgnoringModifiers == "t" {
+            tabOverviewClicked()
+            return nil
+        }
+        
         // Ctrl+Tab / Ctrl+Shift+Tab
         if evt.modifierFlags.contains(.control) && evt.keyCode == 48 { // tab keycode
             if evt.modifierFlags.contains(.shift) {
@@ -404,6 +422,46 @@ class BrowserWindowController: NSWindowController {
     // MARK: - Actions
     fileprivate func railItemClicked(_ index: Int) {
         SiteTabManager.shared.setActiveIndex(index)
+    }
+    
+    fileprivate func tabOverviewClicked() {
+        showTabOverview()
+    }
+    
+    private var tabOverviewView: TabOverviewView?
+    
+    private func showTabOverview() {
+        guard let window = self.window, let contentView = window.contentView else { return }
+        
+        // Don't show if already visible
+        if tabOverviewView != nil { return }
+        
+        let overviewView = TabOverviewView(tabs: SiteTabManager.shared.tabs, activeIndex: SiteTabManager.shared.activeIndex) { [weak self] selectedIndex in
+            self?.hideTabOverview()
+            SiteTabManager.shared.setActiveIndex(selectedIndex)
+        } dismissHandler: { [weak self] in
+            self?.hideTabOverview()
+        }
+        
+        overviewView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(overviewView, positioned: .above, relativeTo: nil)
+        
+        NSLayoutConstraint.activate([
+            overviewView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            overviewView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            overviewView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            overviewView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        ])
+        
+        self.tabOverviewView = overviewView
+        overviewView.appear()
+    }
+    
+    private func hideTabOverview() {
+        tabOverviewView?.disappear { [weak self] in
+            self?.tabOverviewView?.removeFromSuperview()
+            self?.tabOverviewView = nil
+        }
     }
 
     fileprivate func openPreferences() {
@@ -814,6 +872,584 @@ class BrowserWindowController: NSWindowController {
 
         override func rightMouseDown(with event: NSEvent) {
             actionTarget?.showContextMenu(for: site, at: event.locationInWindow)
+        }
+    }
+
+    // MARK: - Tab Overview Button
+    private final class TabOverviewButton: NSView {
+        weak var actionTarget: BrowserWindowController?
+        private let imageView = NSImageView()
+        
+        init(actionTarget: BrowserWindowController?) {
+            self.actionTarget = actionTarget
+            super.init(frame: .zero)
+            setup()
+        }
+        
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        
+        private func setup() {
+            wantsLayer = true
+            layer?.cornerRadius = 8
+            translatesAutoresizingMaskIntoConstraints = false
+            
+            // Use SF Symbol for grid icon
+            let config = NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+            if let gridImage = NSImage(systemSymbolName: "square.on.square", accessibilityDescription: "Tab Overview") {
+                imageView.image = gridImage.withSymbolConfiguration(config)
+            }
+            imageView.contentTintColor = .secondaryLabelColor
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(imageView)
+            
+            NSLayoutConstraint.activate([
+                imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+                imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+                imageView.widthAnchor.constraint(equalToConstant: 24),
+                imageView.heightAnchor.constraint(equalToConstant: 24)
+            ])
+            
+            // Click gesture
+            let click = NSClickGestureRecognizer(target: self, action: #selector(clicked))
+            addGestureRecognizer(click)
+            
+            // Hover effect
+            let tracking = NSTrackingArea(
+                rect: .zero,
+                options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(tracking)
+            
+            // Accessibility
+            setAccessibilityElement(true)
+            setAccessibilityRole(.button)
+            setAccessibilityLabel("Tab Overview")
+            setAccessibilityHelp("Show all tabs in grid view")
+        }
+        
+        @objc private func clicked() {
+            actionTarget?.tabOverviewClicked()
+        }
+        
+        override func mouseEntered(with event: NSEvent) {
+            layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.15).cgColor
+            imageView.contentTintColor = .labelColor
+        }
+        
+        override func mouseExited(with event: NSEvent) {
+            layer?.backgroundColor = .clear
+            imageView.contentTintColor = .secondaryLabelColor
+        }
+    }
+}
+
+// MARK: - Tab Overview Overlay
+class TabOverviewView: NSView {
+    private let tabs: [SiteTab]
+    private let activeIndex: Int
+    private let onSelect: (Int) -> Void
+    private let onDismiss: () -> Void
+    private let scrollView = NSScrollView()
+    private let containerView = NSView()
+    private var itemViews: [TabOverviewItemView] = []
+    private var selectedIndex: Int?
+    private var columns: Int = 1
+    
+    init(tabs: [SiteTab], activeIndex: Int, onSelect: @escaping (Int) -> Void, dismissHandler: @escaping () -> Void) {
+        self.tabs = tabs
+        self.activeIndex = activeIndex
+        self.onSelect = onSelect
+        self.onDismiss = dismissHandler
+        super.init(frame: .zero)
+        setup()
+    }
+    
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    
+    private func setup() {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.0).cgColor
+        
+        // Blur background - blocks all interaction with content below
+        let blurView = NSVisualEffectView()
+        blurView.material = .hudWindow
+        blurView.blendingMode = .behindWindow
+        blurView.state = .active
+        blurView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(blurView)
+        
+        // Block all interaction with content below
+        self.wantsLayer = true
+        self.layer?.backgroundColor = NSColor.clear.cgColor
+        
+        // Scroll view for grid
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        addSubview(scrollView)
+        
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = containerView
+        
+        NSLayoutConstraint.activate([
+            blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            blurView.topAnchor.constraint(equalTo: topAnchor),
+            blurView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            
+            containerView.widthAnchor.constraint(equalTo: scrollView.widthAnchor)
+        ])
+        
+        // Configure scroll view to center content vertically
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsetsZero
+        
+        // Don't call layoutGrid() here - wait until layout() is called with proper dimensions
+        
+        // Click outside to dismiss
+        let click = NSClickGestureRecognizer(target: self, action: #selector(backgroundClicked))
+        addGestureRecognizer(click)
+        
+        // Keyboard support for navigation and selection
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return event }
+            
+            switch event.keyCode {
+            case 53: // Escape
+                self.onDismiss()
+                return nil
+            case 36: // Enter
+                if let selected = self.selectedIndex {
+                    self.onSelect(selected)
+                }
+                return nil
+            case 48: // Tab
+                let forward = !event.modifierFlags.contains(.shift)
+                self.navigateTab(forward: forward)
+                return nil
+            case 123: // Left arrow
+                self.navigateLeft()
+                return nil
+            case 124: // Right arrow
+                self.navigateRight()
+                return nil
+            case 125: // Down arrow
+                self.navigateDown()
+                return nil
+            case 126: // Up arrow
+                self.navigateUp()
+                return nil
+            default:
+                return event
+            }
+        }
+        
+        // Start with active tab selected
+        selectedIndex = activeIndex
+        updateSelection()
+    }
+    
+    private func layoutGrid() {
+        // Guard against layout before view has proper dimensions
+        guard bounds.width > 0 && bounds.height > 0 else { return }
+        
+        // Calculate responsive grid
+        let windowWidth = bounds.width
+        let margin: CGFloat = 40
+        let spacing: CGFloat = 20
+        let minItemWidth: CGFloat = 280
+        let aspectRatio: CGFloat = 16.0 / 10.0 // Width / Height
+        
+        // Calculate columns based on window width
+        let availableWidth = windowWidth - (2 * margin)
+        columns = max(1, Int((availableWidth + spacing) / (minItemWidth + spacing)))
+        columns = min(columns, 4) // Max 4 columns
+        
+        let itemWidth = (availableWidth - CGFloat(columns - 1) * spacing) / CGFloat(columns)
+        let itemHeight = itemWidth / aspectRatio
+        
+        var currentRow: [NSView] = []
+        var topAnchor: NSLayoutYAxisAnchor = containerView.topAnchor
+        var topConstant: CGFloat = margin
+        
+        for (index, tab) in tabs.enumerated() {
+            let itemView = TabOverviewItemView(
+                tab: tab,
+                index: index,
+                isActive: index == activeIndex,
+                width: itemWidth,
+                height: itemHeight
+            )
+            itemView.translatesAutoresizingMaskIntoConstraints = false
+            containerView.addSubview(itemView)
+            itemViews.append(itemView)
+            
+            let column = index % columns
+            currentRow.append(itemView)
+            
+            // Position constraints
+            NSLayoutConstraint.activate([
+                itemView.widthAnchor.constraint(equalToConstant: itemWidth),
+                itemView.heightAnchor.constraint(equalToConstant: itemHeight),
+                itemView.topAnchor.constraint(equalTo: topAnchor, constant: topConstant)
+            ])
+            
+            if column == 0 {
+                itemView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: margin).isActive = true
+            } else {
+                itemView.leadingAnchor.constraint(equalTo: currentRow[column - 1].trailingAnchor, constant: spacing).isActive = true
+            }
+            
+            // Add click handler
+            let click = NSClickGestureRecognizer(target: self, action: #selector(itemClicked(_:)))
+            itemView.addGestureRecognizer(click)
+            itemView.itemIndex = index
+            
+            // Start new row
+            if column == columns - 1 || index == tabs.count - 1 {
+                topAnchor = itemView.bottomAnchor
+                topConstant = spacing
+                currentRow = []
+            }
+        }
+        
+        // Bottom constraint
+        if let lastItem = itemViews.last {
+            lastItem.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -margin).isActive = true
+        }
+    }
+    
+    @objc private func itemClicked(_ gesture: NSClickGestureRecognizer) {
+        guard let view = gesture.view as? TabOverviewItemView else { return }
+        onSelect(view.itemIndex)
+    }
+    
+    @objc private func backgroundClicked(_ gesture: NSClickGestureRecognizer) {
+        let location = gesture.location(in: self)
+        // Only dismiss if clicking outside any item
+        for itemView in itemViews {
+            if itemView.frame.contains(location) {
+                return
+            }
+        }
+        onDismiss()
+    }
+    
+    private func navigateTab(forward: Bool) {
+        guard !tabs.isEmpty else { return }
+        if let current = selectedIndex {
+            selectedIndex = forward ? (current + 1) % tabs.count : (current - 1 + tabs.count) % tabs.count
+        } else {
+            selectedIndex = forward ? 0 : tabs.count - 1
+        }
+        updateSelection()
+    }
+    
+    private func navigateLeft() {
+        guard let current = selectedIndex, current > 0 else { return }
+        selectedIndex = current - 1
+        updateSelection()
+    }
+    
+    private func navigateRight() {
+        guard let current = selectedIndex, current < tabs.count - 1 else { return }
+        selectedIndex = current + 1
+        updateSelection()
+    }
+    
+    private func navigateUp() {
+        guard let current = selectedIndex, current >= columns else { return }
+        selectedIndex = current - columns
+        updateSelection()
+    }
+    
+    private func navigateDown() {
+        guard let current = selectedIndex else { return }
+        let newIndex = current + columns
+        if newIndex < tabs.count {
+            selectedIndex = newIndex
+            updateSelection()
+        }
+    }
+    
+    private func updateSelection() {
+        for (index, itemView) in itemViews.enumerated() {
+            itemView.setSelected(index == selectedIndex)
+        }
+        
+        // Scroll to selected item if needed
+        if let selected = selectedIndex, selected < itemViews.count {
+            let itemView = itemViews[selected]
+            scrollView.contentView.scrollToVisible(itemView.frame)
+        }
+    }
+    
+    func appear() {
+        alphaValue = 0.0
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.2
+            self.animator().alphaValue = 1.0
+        })
+    }
+    
+    func disappear(completion: @escaping () -> Void) {
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.15
+            self.animator().alphaValue = 0.0
+        }, completionHandler: completion)
+    }
+    
+    // Block all mouse events from passing through to content below
+    override var acceptsFirstResponder: Bool { return true }
+    override func mouseDown(with event: NSEvent) { /* Block */ }
+    override func mouseDragged(with event: NSEvent) { /* Block */ }
+    override func mouseUp(with event: NSEvent) { /* Block */ }
+    override func mouseMoved(with event: NSEvent) { /* Block */ }
+    override func mouseEntered(with event: NSEvent) { /* Block */ }
+    override func mouseExited(with event: NSEvent) { /* Block */ }
+    override func rightMouseDown(with event: NSEvent) { /* Block */ }
+    override func rightMouseUp(with event: NSEvent) { /* Block */ }
+    override func otherMouseDown(with event: NSEvent) { /* Block */ }
+    override func otherMouseUp(with event: NSEvent) { /* Block */ }
+    override func scrollWheel(with event: NSEvent) {
+        // Allow scrolling within the overview
+        super.scrollWheel(with: event)
+    }
+    
+    override func cursorUpdate(with event: NSEvent) {
+        // Force arrow cursor and prevent cursor updates from content below
+        NSCursor.arrow.set()
+    }
+    
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .arrow)
+        discardCursorRects()
+        addCursorRect(bounds, cursor: .arrow)
+    }
+    
+    override func layout() {
+        super.layout()
+        // Re-layout grid on window resize
+        for view in containerView.subviews {
+            view.removeFromSuperview()
+        }
+        itemViews.removeAll()
+        layoutGrid()
+        
+        // Center content vertically if it's smaller than the scroll view
+        DispatchQueue.main.async {
+            let contentHeight = self.containerView.bounds.height
+            let scrollHeight = self.scrollView.bounds.height
+            if contentHeight < scrollHeight {
+                let topInset = (scrollHeight - contentHeight) / 2
+                self.scrollView.contentInsets = NSEdgeInsets(top: topInset, left: 0, bottom: topInset, right: 0)
+            } else {
+                self.scrollView.contentInsets = NSEdgeInsetsZero
+            }
+        }
+    }
+}
+
+// MARK: - Tab Overview Item View
+class TabOverviewItemView: NSView {
+    private let tab: SiteTab
+    var itemIndex: Int
+    private let isActive: Bool
+    private let snapshotView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let faviconView = NSImageView()
+    private var isSelected = false
+    
+    init(tab: SiteTab, index: Int, isActive: Bool, width: CGFloat, height: CGFloat) {
+        self.tab = tab
+        self.itemIndex = index
+        self.isActive = isActive
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        setup()
+        captureSnapshot()
+    }
+    
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    
+    private func setup() {
+        wantsLayer = true
+        layer?.cornerRadius = 12
+        layer?.borderWidth = isActive ? 3 : 1
+        layer?.borderColor = isActive ? NSColor.controlAccentColor.cgColor : NSColor.separatorColor.cgColor
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        layer?.shadowOpacity = 0.2
+        layer?.shadowRadius = 8
+        layer?.shadowOffset = NSSize(width: 0, height: -2)
+        
+        // Snapshot view (main content)
+        snapshotView.translatesAutoresizingMaskIntoConstraints = false
+        snapshotView.imageScaling = .scaleProportionallyUpOrDown
+        snapshotView.wantsLayer = true
+        snapshotView.layer?.cornerRadius = 8
+        snapshotView.layer?.masksToBounds = true
+        snapshotView.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        addSubview(snapshotView)
+        
+        // Bottom bar with favicon and title
+        let bottomBar = NSView()
+        bottomBar.translatesAutoresizingMaskIntoConstraints = false
+        bottomBar.wantsLayer = true
+        bottomBar.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.95).cgColor
+        addSubview(bottomBar)
+        
+        // Favicon
+        faviconView.translatesAutoresizingMaskIntoConstraints = false
+        bottomBar.addSubview(faviconView)
+        
+        if let faviconName = tab.site.favicon, let img = FaviconFetcher.shared.image(forResource: faviconName) {
+            faviconView.image = img
+        } else if let host = tab.site.url.host {
+            faviconView.image = FaviconFetcher.shared.generateMonoIcon(for: host)
+        }
+        
+        // Title
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.stringValue = tab.webView.title ?? tab.site.name
+        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.alignment = .left
+        bottomBar.addSubview(titleLabel)
+        
+        // Active indicator
+        if isActive {
+            let activeLabel = NSTextField(labelWithString: "Active")
+            activeLabel.translatesAutoresizingMaskIntoConstraints = false
+            activeLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+            activeLabel.textColor = .controlAccentColor
+            activeLabel.alignment = .right
+            bottomBar.addSubview(activeLabel)
+            
+            NSLayoutConstraint.activate([
+                activeLabel.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor, constant: -12),
+                activeLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor)
+            ])
+        }
+        
+        NSLayoutConstraint.activate([
+            snapshotView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            snapshotView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            snapshotView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            snapshotView.bottomAnchor.constraint(equalTo: bottomBar.topAnchor, constant: -4),
+            
+            bottomBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bottomBar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bottomBar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            bottomBar.heightAnchor.constraint(equalToConstant: 44),
+            
+            faviconView.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor, constant: 12),
+            faviconView.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+            faviconView.widthAnchor.constraint(equalToConstant: 20),
+            faviconView.heightAnchor.constraint(equalToConstant: 20),
+            
+            titleLabel.leadingAnchor.constraint(equalTo: faviconView.trailingAnchor, constant: 8),
+            titleLabel.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: bottomBar.trailingAnchor, constant: isActive ? -70 : -12)
+        ])
+        
+        // Hover tracking
+        let tracking = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(tracking)
+    }
+    
+    private func captureSnapshot() {
+        let webView = tab.webView
+        
+        // Configure snapshot
+        let config = WKSnapshotConfiguration()
+        config.rect = CGRect(x: 0, y: 0, width: webView.bounds.width, height: webView.bounds.height)
+        
+        webView.takeSnapshot(with: config) { [weak self] image, error in
+            guard let self = self, let image = image else {
+                // Show placeholder if snapshot fails
+                DispatchQueue.main.async {
+                    self?.showPlaceholder()
+                }
+                return
+            }
+            
+            DispatchQueue.main.async {
+                self.snapshotView.image = image
+            }
+        }
+    }
+    
+    private func showPlaceholder() {
+        // Show large favicon as placeholder
+        if let faviconName = tab.site.favicon, let img = FaviconFetcher.shared.image(forResource: faviconName) {
+            snapshotView.image = img
+        } else if let host = tab.site.url.host {
+            snapshotView.image = FaviconFetcher.shared.generateMonoIcon(for: host)
+        }
+        snapshotView.imageScaling = .scaleProportionallyDown
+    }
+    
+    override func mouseEntered(with event: NSEvent) {
+        NSCursor.pointingHand.push()
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.15
+            self.layer?.borderColor = NSColor.controlAccentColor.cgColor
+            self.layer?.shadowOpacity = 0.4
+        })
+    }
+    
+    override func mouseExited(with event: NSEvent) {
+        NSCursor.pop()
+        if !isSelected {
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.15
+                self.layer?.borderColor = isActive ? NSColor.controlAccentColor.cgColor : NSColor.separatorColor.cgColor
+                self.layer?.shadowOpacity = 0.2
+            })
+        }
+    }
+    
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+    
+    func setSelected(_ selected: Bool) {
+        isSelected = selected
+        if selected {
+            // Focused state: thick white/light border with strong glow
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.15
+                self.layer?.borderWidth = 5
+                self.layer?.borderColor = NSColor.white.cgColor
+                self.layer?.shadowColor = NSColor.controlAccentColor.cgColor
+                self.layer?.shadowOpacity = 0.8
+                self.layer?.shadowRadius = 12
+            })
+        } else {
+            // Non-focused state
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.15
+                self.layer?.borderWidth = isActive ? 3 : 1
+                self.layer?.borderColor = isActive ? NSColor.controlAccentColor.cgColor : NSColor.separatorColor.cgColor
+                self.layer?.shadowColor = NSColor.black.cgColor
+                self.layer?.shadowOpacity = 0.2
+                self.layer?.shadowRadius = 8
+            })
         }
     }
 }
