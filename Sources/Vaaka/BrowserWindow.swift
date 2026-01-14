@@ -192,6 +192,10 @@ class BrowserWindowController: NSWindowController {
             self.updateRailSelection(activeIndex: idx)
             self.setActiveWebViewVisibility(index: idx)
             self.updateWindowTitleForActiveTab()
+            // Clear unread for newly active site to reflect 'visited'
+            if let active = SiteTabManager.shared.activeTab() {
+                UnreadManager.shared.clear(for: active.site.id)
+            }
         }
     }
 
@@ -496,6 +500,8 @@ class BrowserWindowController: NSWindowController {
         private let imageView = NSImageView()
         private let indicator = NSView()
         private let spinner = NSProgressIndicator()
+        private let badgeContainer = NSView()
+        private let badgeLabel = NSTextField(labelWithString: "")
         private var tracking: NSTrackingArea?
         private weak var actionTarget: BrowserWindowController?
 
@@ -544,6 +550,27 @@ class BrowserWindowController: NSWindowController {
             imageView.imageScaling = .scaleProportionallyUpOrDown
             imageView.setAccessibilityHidden(true)
 
+            // Badge setup (hidden by default)
+            badgeContainer.translatesAutoresizingMaskIntoConstraints = false
+            badgeContainer.wantsLayer = true
+            badgeContainer.isHidden = true
+            badgeContainer.layer?.backgroundColor = NSColor.systemRed.cgColor
+            badgeContainer.layer?.cornerRadius = 8
+            badgeContainer.setAccessibilityHidden(true)
+
+            badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+            badgeLabel.font = NSFont.systemFont(ofSize: 10, weight: .bold)
+            badgeLabel.textColor = .white
+            badgeLabel.alignment = .center
+            badgeLabel.setAccessibilityHidden(true)
+            badgeContainer.addSubview(badgeLabel)
+            NSLayoutConstraint.activate([
+                badgeLabel.leadingAnchor.constraint(equalTo: badgeContainer.leadingAnchor, constant: 4),
+                badgeLabel.trailingAnchor.constraint(equalTo: badgeContainer.trailingAnchor, constant: -4),
+                badgeLabel.topAnchor.constraint(equalTo: badgeContainer.topAnchor, constant: 1),
+                badgeLabel.bottomAnchor.constraint(equalTo: badgeContainer.bottomAnchor, constant: -1)
+            ])
+
             spinner.style = .spinning
 
             // Accessibility for tab item
@@ -561,6 +588,7 @@ class BrowserWindowController: NSWindowController {
             addSubview(indicator)
             addSubview(imageView)
             addSubview(spinner)
+            addSubview(badgeContainer)
 
             NSLayoutConstraint.activate([
                 indicator.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -578,6 +606,13 @@ class BrowserWindowController: NSWindowController {
                 spinner.centerYAnchor.constraint(equalTo: imageView.centerYAnchor)
             ])
 
+            // Position badge at top-right of the favicon
+            NSLayoutConstraint.activate([
+                badgeContainer.heightAnchor.constraint(equalToConstant: 16),
+                badgeContainer.centerYAnchor.constraint(equalTo: imageView.topAnchor, constant: 2),
+                badgeContainer.centerXAnchor.constraint(equalTo: imageView.trailingAnchor, constant: -2)
+            ])
+
             // Accessibility: make this rail item an accessibility element (acts like a button)
             self.setAccessibilityElement(true)
             self.setAccessibilityRole(.button)
@@ -587,6 +622,10 @@ class BrowserWindowController: NSWindowController {
             self.toolTip = site.name
 
             // Use instance methods for image/visibility updates (no noisy prints)
+
+            // Initial badge state
+            self.updateBadge()
+            NotificationCenter.default.addObserver(self, selector: #selector(unreadChanged(_:)), name: .UnreadChanged, object: nil)
 
             // Load favicon (SVG preferred, PNG allowed, generated fallback)
             if let name = site.favicon {
@@ -620,6 +659,22 @@ class BrowserWindowController: NSWindowController {
             // Click handling
             let click = NSClickGestureRecognizer(target: self, action: #selector(clicked(_:)))
             addGestureRecognizer(click)
+        }
+
+        @objc private func unreadChanged(_ note: Notification) {
+            guard let siteId = note.object as? String, siteId == site.id else { return }
+            updateBadge()
+        }
+
+        private func updateBadge() {
+            let count = UnreadManager.shared.count(for: site.id)
+            if count > 0 {
+                badgeLabel.stringValue = count > 9 ? "9+" : "\(count)"
+                badgeContainer.isHidden = false
+            } else {
+                badgeContainer.isHidden = true
+                badgeLabel.stringValue = ""
+            }
         }
 
         override func updateTrackingAreas() {

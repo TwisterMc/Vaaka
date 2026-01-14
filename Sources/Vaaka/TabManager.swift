@@ -29,6 +29,11 @@ final class SiteTabManager: NSObject {
         didSet {
             NotificationCenter.default.post(name: .ActiveTabChanged, object: self)
             persistLastActiveSite()
+            // Mark active site as read (clear unread count)
+            if activeIndex >= 0 && activeIndex < tabs.count {
+                let siteId = tabs[activeIndex].site.id
+                UnreadManager.shared.clear(for: siteId)
+            }
         }
     }
 
@@ -281,7 +286,11 @@ private final class NotificationMessageHandler: NSObject, WKScriptMessageHandler
         guard NotificationManager.shared.isEnabledForSite(site.id) else {
             return
         }
-
+        // If this site is not the active one, mark as unread
+        let isActive = (SiteTabManager.shared.activeTab()?.site.id == site.id)
+        if !isActive {
+            UnreadManager.shared.increment(for: site.id)
+        }
         NotificationManager.shared.sendNotification(title: title, body: bodyText, siteId: site.id)
     }
 }
