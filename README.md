@@ -19,7 +19,7 @@ The idea came from the Fluid app from back in the day, where I could whiltelist 
 
 ## How It Works
 
-1. **Configure Your Sites** - Add your preferred websites in Settings (e.g., Gmail, Slack, GitHub, documentation sites) - That's it.
+**Configure Your Sites** - Add your preferred websites in Settings (e.g., Gmail, Slack, GitHub, documentation sites) - That's it.
 
 ### Features
 
@@ -39,11 +39,11 @@ The idea came from the Fluid app from back in the day, where I could whiltelist 
 
 ### From Release
 
-Download the latest `.dmg` from [Releases](https://github.com/twistermc/Vaaka/releases) and drag `Vaaka.app` to your Applications folder.
+Download the latest release from [Releases](https://github.com/twistermc/Vaaka/releases), un-compress, and drag `Vaaka.app` to your Applications folder.
 
 This app is self-signed and notarized by Apple. The first time you open it, you will need to right-click the app and select "Open" to bypass Gatekeeper or approve it in System Preferences > Security & Privacy.
 
-It's not signed because I don't want to pay Apple the $99/year fee for a developer account at this time.
+It's not signed because I don't want to pay Apple the fee for a developer account at this time.
 
 ## Requirements:
 
