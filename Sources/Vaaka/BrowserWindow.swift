@@ -454,6 +454,15 @@ class BrowserWindowController: NSWindowController {
         ])
         
         self.tabOverviewView = overviewView
+        
+        // Force layout to complete before scrolling
+        overviewView.layoutSubtreeIfNeeded()
+        
+        // Scroll to top after layout is done
+        DispatchQueue.main.async {
+            overviewView.scrollToTop()
+        }
+        
         overviewView.appear()
     }
     
@@ -945,6 +954,39 @@ class BrowserWindowController: NSWindowController {
     }
 }
 
+// MARK: - Snapshot Cache
+class SnapshotCache {
+    static let shared = SnapshotCache()
+    
+    private struct CachedSnapshot {
+        let image: NSImage
+        let timestamp: Date
+    }
+    
+    private var cache: [String: CachedSnapshot] = [:]
+    private let cacheExpiration: TimeInterval = 120 // 2 minutes
+    
+    func get(for siteId: String) -> NSImage? {
+        guard let cached = cache[siteId] else { return nil }
+        
+        // Check if expired
+        if Date().timeIntervalSince(cached.timestamp) > cacheExpiration {
+            cache.removeValue(forKey: siteId)
+            return nil
+        }
+        
+        return cached.image
+    }
+    
+    func set(_ image: NSImage, for siteId: String) {
+        cache[siteId] = CachedSnapshot(image: image, timestamp: Date())
+    }
+    
+    func clear() {
+        cache.removeAll()
+    }
+}
+
 // MARK: - Tab Overview Overlay
 class TabOverviewView: NSView {
     private let tabs: [SiteTab]
@@ -1011,6 +1053,14 @@ class TabOverviewView: NSView {
         // Configure scroll view to center content vertically
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.contentInsets = NSEdgeInsetsZero
+        
+        // Set up scroll view notifications for lazy loading
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(scrollViewDidScroll),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
         
         // Don't call layoutGrid() here - wait until layout() is called with proper dimensions
         
@@ -1194,10 +1244,16 @@ class TabOverviewView: NSView {
     
     func appear() {
         alphaValue = 0.0
+        
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.2
             self.animator().alphaValue = 1.0
         })
+    }
+    
+    func scrollToTop() {
+        scrollView.contentView.scroll(to: NSPoint.zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
     
     func disappear(completion: @escaping () -> Void) {
@@ -1205,6 +1261,17 @@ class TabOverviewView: NSView {
             context.duration = 0.15
             self.animator().alphaValue = 0.0
         }, completionHandler: completion)
+    }
+    
+    @objc private func scrollViewDidScroll() {
+        // Trigger snapshot capture for newly visible items
+        let visibleRect = scrollView.documentVisibleRect
+        for itemView in itemViews where !itemView.hasSnapshot {
+            let itemFrame = itemView.frame
+            if visibleRect.intersects(itemFrame) {
+                itemView.captureSnapshotIfNeeded()
+            }
+        }
     }
     
     // Block all mouse events from passing through to content below
@@ -1268,14 +1335,23 @@ class TabOverviewItemView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let faviconView = NSImageView()
     private var isSelected = false
+    private(set) var hasSnapshot = false
+    private let displayWidth: CGFloat
+    private let displayHeight: CGFloat
     
     init(tab: SiteTab, index: Int, isActive: Bool, width: CGFloat, height: CGFloat) {
         self.tab = tab
         self.itemIndex = index
         self.isActive = isActive
+        self.displayWidth = width
+        self.displayHeight = height
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
         setup()
-        captureSnapshot()
+        
+        // Only capture first 10 items immediately, rest are lazy loaded
+        if index < 10 {
+            captureSnapshotIfNeeded()
+        }
     }
     
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -1371,24 +1447,61 @@ class TabOverviewItemView: NSView {
         addTrackingArea(tracking)
     }
     
-    private func captureSnapshot() {
+    func captureSnapshotIfNeeded() {
+        guard !hasSnapshot else { return }
+        
+        // Check cache first
+        if let cachedImage = SnapshotCache.shared.get(for: tab.site.id) {
+            snapshotView.image = cachedImage
+            hasSnapshot = true
+            return
+        }
+        
         let webView = tab.webView
         
-        // Configure snapshot
+        // Calculate thumbnail size (2x for retina)
+        let scale: CGFloat = 2.0
+        let thumbnailWidth = displayWidth * scale
+        let thumbnailHeight = (displayHeight - 44) * scale // Subtract bottom bar height
+        
+        // Configure snapshot at thumbnail size instead of full webView size
         let config = WKSnapshotConfiguration()
-        config.rect = CGRect(x: 0, y: 0, width: webView.bounds.width, height: webView.bounds.height)
+        
+        // Calculate the portion of webView to capture while maintaining aspect ratio
+        let webViewAspect = webView.bounds.width / webView.bounds.height
+        let thumbnailAspect = thumbnailWidth / thumbnailHeight
+        
+        var snapshotRect: CGRect
+        if webViewAspect > thumbnailAspect {
+            // WebView is wider, capture centered width
+            let captureWidth = webView.bounds.height * thumbnailAspect
+            let offsetX = (webView.bounds.width - captureWidth) / 2
+            snapshotRect = CGRect(x: offsetX, y: 0, width: captureWidth, height: webView.bounds.height)
+        } else {
+            // WebView is taller, capture from top
+            let captureHeight = webView.bounds.width / thumbnailAspect
+            snapshotRect = CGRect(x: 0, y: 0, width: webView.bounds.width, height: captureHeight)
+        }
+        
+        config.rect = snapshotRect
+        config.snapshotWidth = NSNumber(value: Double(thumbnailWidth))
         
         webView.takeSnapshot(with: config) { [weak self] image, error in
-            guard let self = self, let image = image else {
+            guard let self = self else { return }
+            
+            if let image = image {
+                DispatchQueue.main.async {
+                    self.snapshotView.image = image
+                    self.hasSnapshot = true
+                    // Cache the snapshot
+                    SnapshotCache.shared.set(image, for: self.tab.site.id)
+                }
+            } else {
                 // Show placeholder if snapshot fails
                 DispatchQueue.main.async {
-                    self?.showPlaceholder()
+                    self.showPlaceholder()
+                    self.hasSnapshot = true
                 }
-                return
-            }
-            
-            DispatchQueue.main.async {
-                self.snapshotView.image = image
             }
         }
     }
