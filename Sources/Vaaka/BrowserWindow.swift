@@ -457,10 +457,13 @@ class BrowserWindowController: NSWindowController {
         
         // Force layout to complete before scrolling
         overviewView.layoutSubtreeIfNeeded()
+        overviewView.dumpDebugState(prefix: "showTabOverview: after immediate layout")
         
-        // Scroll to top after layout is done
-        DispatchQueue.main.async {
-            overviewView.scrollToTop()
+        // Deferred pass: re-run centering so any late layout changes are handled
+        DispatchQueue.main.async { [weak overviewView] in
+            guard let overviewView = overviewView else { return }
+            overviewView.centerContentVertically(retryAttempt: 1)
+            overviewView.dumpDebugState(prefix: "showTabOverview: deferred center pass")
         }
         
         overviewView.appear()
@@ -998,6 +1001,20 @@ class TabOverviewView: NSView {
     private var itemViews: [TabOverviewItemView] = []
     private var selectedIndex: Int?
     private var columns: Int = 1
+    private var lastLayoutSize: CGSize = .zero
+
+    // Debugging aids (temporary)
+    fileprivate let kDebugTabOverview: Bool = true
+    fileprivate func debugLog(_ message: String) {
+        if kDebugTabOverview {
+            NSLog("TabOverviewDebug: %@", message)
+        }
+    }
+
+    // Dump internal state for external callers (fileprivate to allow calls from this file)
+    fileprivate func dumpDebugState(prefix: String) {
+        debugLog("\(prefix) - container.bounds=\(containerView.bounds) fitting=\(containerView.fittingSize) scrollClip=\(scrollView.contentView.bounds) insets=\(scrollView.contentInsets)")
+    }
     
     init(tabs: [SiteTab], activeIndex: Int, onSelect: @escaping (Int) -> Void, dismissHandler: @escaping () -> Void) {
         self.tabs = tabs
@@ -1062,7 +1079,7 @@ class TabOverviewView: NSView {
             object: scrollView.contentView
         )
         
-        // Don't call layoutGrid() here - wait until layout() is called with proper dimensions
+        // Initial grid will be built once the view has a valid size
         
         // Click outside to dismiss
         let click = NSClickGestureRecognizer(target: self, action: #selector(backgroundClicked))
@@ -1105,6 +1122,112 @@ class TabOverviewView: NSView {
         // Start with active tab selected
         selectedIndex = activeIndex
         updateSelection()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateGridIfNeeded()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updateGridIfNeeded()
+    }
+
+    private func updateGridIfNeeded() {
+        let size = bounds.size
+        guard size.width > 0 && size.height > 0 else { return }
+        if size != lastLayoutSize {
+            rebuildGrid(for: size)
+            lastLayoutSize = size
+        }
+    }
+
+    private func rebuildGrid(for size: CGSize) {
+        // Clear existing views only when the size actually changes
+        containerView.subviews.forEach { $0.removeFromSuperview() }
+        itemViews.removeAll()
+        layoutGrid()
+
+        // Ensure frames are up to date before adjusting insets
+        containerView.layoutSubtreeIfNeeded()
+        debugLog("rebuildGrid: after container layout - container.bounds=\(containerView.bounds), fittingSize=\(containerView.fittingSize)")
+        
+        // Force layer geometry to sync before hit-testing becomes active
+        // This prevents coordinate space mismatches in layer-backed scroll views
+        CATransaction.begin()
+        CATransaction.flush()
+        CATransaction.commit()
+        debugLog("rebuildGrid: after CATransaction.flush")
+        
+        // Force scroll view to update its document view's bounds
+        scrollView.layoutSubtreeIfNeeded()
+        debugLog("rebuildGrid: after scroll layout - scrollClip=\(scrollView.contentView.bounds), insets=\(scrollView.contentInsets)")
+        
+        // Synchronously center now (with retries if the document view hasn't stabilized)
+        centerContentVertically(retryAttempt: 0)
+
+        // Also schedule a follow-up re-center on the next run-loop in case some
+        // frames (documentView / scroll clip) are still being finalized by AppKit.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.scrollView.layoutSubtreeIfNeeded()
+            self.debugLog("rebuildGrid: deferred pass - scrollClip=\(self.scrollView.contentView.bounds), insets=\(self.scrollView.contentInsets)")
+            // Re-apply resolved appearance colors after layout stabilizes
+            self.itemViews.forEach { $0.updateAppearance() }
+            self.centerContentVertically(retryAttempt: 1)
+        }
+
+        // Preserve current selection highlight after rebuild
+        updateSelection()
+    }
+
+    fileprivate func centerContentVertically(retryAttempt: Int = 0) {
+        // Ensure layout is applied before measuring
+        containerView.layoutSubtreeIfNeeded()
+        scrollView.layoutSubtreeIfNeeded()
+
+        // Use fittingSize so we measure the size Auto Layout wants for the document view
+        let contentHeight = containerView.fittingSize.height
+        let scrollHeight = scrollView.contentView.bounds.height
+        debugLog("centerContentVertically: attempt=\(retryAttempt) contentHeight=\(contentHeight) scrollHeight=\(scrollHeight) insets=\(scrollView.contentInsets)")
+
+        // If sizes are not ready yet, schedule a short retry (Safari-like patience)
+        if contentHeight <= 0 || scrollHeight <= 0 {
+            debugLog("centerContentVertically: sizes not ready, scheduling retry \(retryAttempt + 1)")
+            if retryAttempt < 3 {
+                let delays: [TimeInterval] = [0.02, 0.08, 0.2]
+                let delay = delays[min(retryAttempt, delays.count - 1)]
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.centerContentVertically(retryAttempt: retryAttempt + 1)
+                }
+            }
+            return
+        }
+
+        if contentHeight < scrollHeight {
+            let topInset = (scrollHeight - contentHeight) / 2
+            debugLog("centerContentVertically: wantTopInset=\(topInset)")
+            if scrollView.contentInsets.top != topInset {
+                scrollView.contentInsets = NSEdgeInsets(top: topInset, left: 0, bottom: topInset, right: 0)
+                debugLog("centerContentVertically: applied insets=\(scrollView.contentInsets)")
+                // Ensure content is positioned after insets change
+                // Note: when content is smaller than the clip, origin (0,0) shows the bottom.
+                // To center visually, scroll the clip origin upward by -topInset.
+                scrollView.contentView.scroll(to: NSPoint(x: 0, y: -topInset))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+                debugLog("centerContentVertically: scrolled clip origin to \(scrollView.contentView.bounds.origin)")
+            }
+        } else {
+            // NSEdgeInsets does not conform to Equatable; compare components instead
+            let insets = scrollView.contentInsets
+            if insets.top != 0 || insets.bottom != 0 || insets.left != 0 || insets.right != 0 {
+                scrollView.contentInsets = NSEdgeInsetsZero
+                debugLog("centerContentVertically: cleared insets")
+                scrollView.contentView.scroll(to: NSPoint.zero)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
     }
     
     private func layoutGrid() {
@@ -1303,27 +1426,7 @@ class TabOverviewView: NSView {
         addCursorRect(bounds, cursor: .arrow)
     }
     
-    override func layout() {
-        super.layout()
-        // Re-layout grid on window resize
-        for view in containerView.subviews {
-            view.removeFromSuperview()
-        }
-        itemViews.removeAll()
-        layoutGrid()
-        
-        // Center content vertically if it's smaller than the scroll view
-        DispatchQueue.main.async {
-            let contentHeight = self.containerView.bounds.height
-            let scrollHeight = self.scrollView.bounds.height
-            if contentHeight < scrollHeight {
-                let topInset = (scrollHeight - contentHeight) / 2
-                self.scrollView.contentInsets = NSEdgeInsets(top: topInset, left: 0, bottom: topInset, right: 0)
-            } else {
-                self.scrollView.contentInsets = NSEdgeInsetsZero
-            }
-        }
-    }
+    // No heavy work in layout(): grid is built only on size changes
 }
 
 // MARK: - Tab Overview Item View
@@ -1361,10 +1464,13 @@ class TabOverviewItemView: NSView {
         layer?.cornerRadius = 12
         layer?.borderWidth = isActive ? 3 : 1
         layer?.borderColor = isActive ? NSColor.controlAccentColor.cgColor : NSColor.separatorColor.cgColor
-        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        // Defer background color resolution to updateAppearance() so we pick up the effective appearance
+        layer?.backgroundColor = NSColor.clear.cgColor
         layer?.shadowOpacity = 0.2
         layer?.shadowRadius = 8
         layer?.shadowOffset = NSSize(width: 0, height: -2)
+        // Prevent implicit animations on color changes (stops blinking during resize)
+        layer?.actions = ["backgroundColor": NSNull(), "borderColor": NSNull(), "shadowColor": NSNull()]
         
         // Snapshot view (main content)
         snapshotView.translatesAutoresizingMaskIntoConstraints = false
@@ -1372,19 +1478,18 @@ class TabOverviewItemView: NSView {
         snapshotView.wantsLayer = true
         snapshotView.layer?.cornerRadius = 8
         snapshotView.layer?.masksToBounds = true
-        snapshotView.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        // Defer snapshot background color to updateAppearance()
+        snapshotView.layer?.backgroundColor = NSColor.clear.cgColor
         addSubview(snapshotView)
         
         // Bottom bar with favicon and title
         let bottomBar = NSView()
         bottomBar.translatesAutoresizingMaskIntoConstraints = false
         bottomBar.wantsLayer = true
-        bottomBar.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.95).cgColor
+        // Defer bottom bar color to updateAppearance()
+        bottomBar.layer?.backgroundColor = NSColor.clear.cgColor
+        bottomBar.identifier = NSUserInterfaceItemIdentifier("TabOverviewItemBottomBar")
         addSubview(bottomBar)
-        
-        // Favicon
-        faviconView.translatesAutoresizingMaskIntoConstraints = false
-        bottomBar.addSubview(faviconView)
         
         if let faviconName = tab.site.favicon, let img = FaviconFetcher.shared.image(forResource: faviconName) {
             faviconView.image = img
@@ -1400,6 +1505,10 @@ class TabOverviewItemView: NSView {
         titleLabel.maximumNumberOfLines = 1
         titleLabel.alignment = .left
         bottomBar.addSubview(titleLabel)
+        
+        // Favicon
+        faviconView.translatesAutoresizingMaskIntoConstraints = false
+        bottomBar.addSubview(faviconView)
         
         // Active indicator
         if isActive {
@@ -1445,6 +1554,31 @@ class TabOverviewItemView: NSView {
             userInfo: nil
         )
         addTrackingArea(tracking)
+
+        // Ensure colors match the current effective appearance
+        updateAppearance()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        // Re-apply appearance-resolved colors when the system appearance changes
+        updateAppearance()
+    }
+
+    // Update layer-backed colors according to the view's effective appearance
+    fileprivate func updateAppearance() {
+        // Resolve semantic colors for the current appearance context without animations
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            self.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+            self.snapshotView.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+            // bottomBar is identified by a known identifier
+            if let bottomBar = self.subviews.first(where: { $0.identifier?.rawValue == "TabOverviewItemBottomBar" }) {
+                bottomBar.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.95).cgColor
+            }
+        }
+        CATransaction.commit()
     }
     
     func captureSnapshotIfNeeded() {
