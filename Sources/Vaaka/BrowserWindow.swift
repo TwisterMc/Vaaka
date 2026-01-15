@@ -457,13 +457,11 @@ class BrowserWindowController: NSWindowController {
         
         // Force layout to complete before scrolling
         overviewView.layoutSubtreeIfNeeded()
-        overviewView.dumpDebugState(prefix: "showTabOverview: after immediate layout")
         
         // Deferred pass: re-run centering so any late layout changes are handled
         DispatchQueue.main.async { [weak overviewView] in
             guard let overviewView = overviewView else { return }
             overviewView.centerContentVertically(retryAttempt: 1)
-            overviewView.dumpDebugState(prefix: "showTabOverview: deferred center pass")
         }
         
         overviewView.appear()
@@ -1003,18 +1001,8 @@ class TabOverviewView: NSView {
     private var columns: Int = 1
     private var lastLayoutSize: CGSize = .zero
 
-    // Debugging aids (temporary)
-    fileprivate let kDebugTabOverview: Bool = true
-    fileprivate func debugLog(_ message: String) {
-        if kDebugTabOverview {
-            NSLog("TabOverviewDebug: %@", message)
-        }
-    }
+    // Debugging aids (temporary) - gated behind DEBUG so they never log in release builds
 
-    // Dump internal state for external callers (fileprivate to allow calls from this file)
-    fileprivate func dumpDebugState(prefix: String) {
-        debugLog("\(prefix) - container.bounds=\(containerView.bounds) fitting=\(containerView.fittingSize) scrollClip=\(scrollView.contentView.bounds) insets=\(scrollView.contentInsets)")
-    }
     
     init(tabs: [SiteTab], activeIndex: Int, onSelect: @escaping (Int) -> Void, dismissHandler: @escaping () -> Void) {
         self.tabs = tabs
@@ -1151,18 +1139,15 @@ class TabOverviewView: NSView {
 
         // Ensure frames are up to date before adjusting insets
         containerView.layoutSubtreeIfNeeded()
-        debugLog("rebuildGrid: after container layout - container.bounds=\(containerView.bounds), fittingSize=\(containerView.fittingSize)")
         
         // Force layer geometry to sync before hit-testing becomes active
         // This prevents coordinate space mismatches in layer-backed scroll views
         CATransaction.begin()
         CATransaction.flush()
         CATransaction.commit()
-        debugLog("rebuildGrid: after CATransaction.flush")
         
         // Force scroll view to update its document view's bounds
         scrollView.layoutSubtreeIfNeeded()
-        debugLog("rebuildGrid: after scroll layout - scrollClip=\(scrollView.contentView.bounds), insets=\(scrollView.contentInsets)")
         
         // Synchronously center now (with retries if the document view hasn't stabilized)
         centerContentVertically(retryAttempt: 0)
@@ -1172,7 +1157,6 @@ class TabOverviewView: NSView {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.scrollView.layoutSubtreeIfNeeded()
-            self.debugLog("rebuildGrid: deferred pass - scrollClip=\(self.scrollView.contentView.bounds), insets=\(self.scrollView.contentInsets)")
             // Re-apply resolved appearance colors after layout stabilizes
             self.itemViews.forEach { $0.updateAppearance() }
             self.centerContentVertically(retryAttempt: 1)
@@ -1190,11 +1174,9 @@ class TabOverviewView: NSView {
         // Use fittingSize so we measure the size Auto Layout wants for the document view
         let contentHeight = containerView.fittingSize.height
         let scrollHeight = scrollView.contentView.bounds.height
-        debugLog("centerContentVertically: attempt=\(retryAttempt) contentHeight=\(contentHeight) scrollHeight=\(scrollHeight) insets=\(scrollView.contentInsets)")
 
         // If sizes are not ready yet, schedule a short retry (Safari-like patience)
         if contentHeight <= 0 || scrollHeight <= 0 {
-            debugLog("centerContentVertically: sizes not ready, scheduling retry \(retryAttempt + 1)")
             if retryAttempt < 3 {
                 let delays: [TimeInterval] = [0.02, 0.08, 0.2]
                 let delay = delays[min(retryAttempt, delays.count - 1)]
@@ -1207,23 +1189,18 @@ class TabOverviewView: NSView {
 
         if contentHeight < scrollHeight {
             let topInset = (scrollHeight - contentHeight) / 2
-            debugLog("centerContentVertically: wantTopInset=\(topInset)")
             if scrollView.contentInsets.top != topInset {
                 scrollView.contentInsets = NSEdgeInsets(top: topInset, left: 0, bottom: topInset, right: 0)
-                debugLog("centerContentVertically: applied insets=\(scrollView.contentInsets)")
                 // Ensure content is positioned after insets change
                 // Note: when content is smaller than the clip, origin (0,0) shows the bottom.
                 // To center visually, scroll the clip origin upward by -topInset.
                 scrollView.contentView.scroll(to: NSPoint(x: 0, y: -topInset))
                 scrollView.reflectScrolledClipView(scrollView.contentView)
-                debugLog("centerContentVertically: scrolled clip origin to \(scrollView.contentView.bounds.origin)")
             }
         } else {
-            // NSEdgeInsets does not conform to Equatable; compare components instead
-            let insets = scrollView.contentInsets
-            if insets.top != 0 || insets.bottom != 0 || insets.left != 0 || insets.right != 0 {
+            // Clear any existing centering insets
+            if !NSEdgeInsetsEqual(scrollView.contentInsets, NSEdgeInsetsZero) {
                 scrollView.contentInsets = NSEdgeInsetsZero
-                debugLog("centerContentVertically: cleared insets")
                 scrollView.contentView.scroll(to: NSPoint.zero)
                 scrollView.reflectScrolledClipView(scrollView.contentView)
             }
