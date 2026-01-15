@@ -424,7 +424,7 @@ class BrowserWindowController: NSWindowController {
         SiteTabManager.shared.setActiveIndex(index)
     }
     
-    fileprivate func tabOverviewClicked() {
+    @objc func tabOverviewClicked(_ sender: Any? = nil) {
         showTabOverview()
     }
     

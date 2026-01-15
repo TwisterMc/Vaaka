@@ -150,6 +150,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        // Tab Overview
+        let tabOverviewItem = NSMenuItem(title: "Tab Overview", action: #selector(BrowserWindowController.tabOverviewClicked(_:)), keyEquivalent: "t")
+        tabOverviewItem.keyEquivalentModifierMask = [.command]
+        windowMenu.addItem(tabOverviewItem)
         windowMenuItem.submenu = windowMenu
 
         // Help menu

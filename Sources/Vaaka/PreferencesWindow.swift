@@ -376,14 +376,20 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
 
     @objc private func toggleNotifications(_ sender: NSButton) {
         let on = sender.state == .on
-        UserDefaults.standard.set(on, forKey: "Vaaka.NotificationsEnabledGlobal")
-        
-        // Request permission if enabling
+        // Use NotificationManager to handle permission flow and prefs
         if on {
-            NotificationManager.shared.requestPermission { granted in
-                if !granted {
-                    print("[DEBUG] User denied notification permission")
+            NotificationManager.shared.setGlobalEnabled(true) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        sender.state = .on
+                    } else {
+                        sender.state = .off
+                    }
                 }
+            }
+        } else {
+            NotificationManager.shared.setGlobalEnabled(false) { _ in
+                DispatchQueue.main.async { sender.state = .off }
             }
         }
     }
@@ -392,8 +398,23 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         let row = sender.tag
         guard row >= 0, row < SiteManager.shared.sites.count else { return }
         let site = SiteManager.shared.sites[row]
-        let enabled = sender.state == .on
-        NotificationManager.shared.setEnabled(enabled, forSite: site.id)
+        let enabling = sender.state == .on
+
+        if enabling {
+            NotificationManager.shared.requestPermission { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        NotificationManager.shared.setEnabled(true, forSite: site.id)
+                    } else {
+                        // Revert UI and pref
+                        sender.state = .off
+                        NotificationManager.shared.setEnabled(false, forSite: site.id)
+                    }
+                }
+            }
+        } else {
+            NotificationManager.shared.setEnabled(false, forSite: site.id)
+        }
     }
 
     @objc private func refreshFavicons() {

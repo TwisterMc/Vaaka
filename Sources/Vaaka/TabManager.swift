@@ -268,6 +268,21 @@ private final class SelfUIDelegate: NSObject, WKUIDelegate {
         NSWorkspace.shared.open(url)
         return nil
     }
+
+    // Support <input type="file"> by presenting an NSOpenPanel and returning selected URLs
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.beginSheetModal(for: webView.window ?? NSApp.keyWindow ?? NSWindow()) { response in
+            if response == .OK {
+                completionHandler(panel.urls)
+            } else {
+                completionHandler(nil)
+            }
+        }
+    }
 }
 // MARK: - Notification Message Handler
 private final class NotificationMessageHandler: NSObject, WKScriptMessageHandler {
