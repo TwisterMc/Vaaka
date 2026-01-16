@@ -208,8 +208,44 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         NotificationCenter.default.post(name: .SiteTabDidFailLoading, object: nil, userInfo: ["siteId": site.id, "url": webView.url?.absoluteString ?? "<no-url>", "errorDomain": nsErr.domain, "errorCode": nsErr.code, "errorDescription": nsErr.localizedDescription])
     }
 
+    // Handle content process termination which can leave the WebView blank — attempt in-app recovery
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Logger.shared.debug("[DEBUG] webViewWebContentProcessDidTerminate received for site: \(site.name)")
+        // Find the SiteTab for this webView and ask it to recover
+        if let tab = SiteTabManager.shared.tabs.first(where: { $0.site.id == site.id }) {
+            tab.handleContentProcessTermination()
+        }
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        // If the response is not displayable by WebKit (e.g., unknown MIME) or explicitly marked as an attachment,
+        // treat it as a download so we can manage it via WKDownload and avoid embedding potentially large or binary blobs.
+        if !navigationResponse.canShowMIMEType {
+            return decisionHandler(.download)
+        }
+
+        if let http = navigationResponse.response as? HTTPURLResponse,
+           let cd = http.allHeaderFields["Content-Disposition"] as? String,
+           cd.lowercased().contains("attachment") {
+            return decisionHandler(.download)
+        }
+
         decisionHandler(.allow)
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        Logger.shared.debug("[DEBUG] navigationResponse didBecome WKDownload for site: \(site.name)")
+        // Locate the corresponding SiteTab and attach a handler to manage the download lifecycle and destination.
+        if let tab = SiteTabManager.shared.tabs.first(where: { $0.webView == webView }) {
+            let handler = SiteTab.SiteDownloadHandler(siteTab: tab, download: download)
+            // Create a provisional DownloadsManager entry so UI can show activity immediately
+            let id = UUID().uuidString
+            handler.downloadId = id
+            DownloadsManager.shared.addExternalDownload(id: id, siteId: tab.site.id, sourceURL: nil, suggestedFilename: "download", destination: nil, taskIdentifier: nil)
+            DownloadsManager.shared.registerCancellable(id: id, handler)
+            tab.registerDownloadHandler(handler, for: download)
+            download.delegate = handler
+        }
     }
 }
 

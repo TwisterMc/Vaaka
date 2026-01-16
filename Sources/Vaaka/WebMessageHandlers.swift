@@ -91,3 +91,23 @@ final class ConsoleMessageHandler: NSObject, WKScriptMessageHandler {
         Logger.shared.debug(line)
     }
 }
+
+// Handle contextmenu events reported from the page (e.g., right-click on an <img>) so we can present
+// a native Save dialog and handle the download natively (works around WebKit default menu limitations).
+final class ContextMenuHandler: NSObject, WKScriptMessageHandler {
+    private weak var siteTab: SiteTab?
+
+    init(siteTab: SiteTab) {
+        self.siteTab = siteTab
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let tab = siteTab else { return }
+        guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
+
+        if type == "image", let src = body["src"] as? String {
+            // Post notification so BrowserWindowController can present the menu at the proper location
+            NotificationCenter.default.post(name: Notification.Name("Vaaka.ContextMenuImage"), object: nil, userInfo: ["siteId": tab.site.id, "src": src])
+        }
+    }
+}

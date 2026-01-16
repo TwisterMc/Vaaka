@@ -15,6 +15,10 @@ class BrowserWindowController: NSWindowController {
     // Track created webviews attached to the content container
     private var webViewsAttached: Set<String> = [] // site.id values
 
+    // Downloads UI
+    private let downloadsBar = DownloadsBarView()
+    private var downloadsBarHeightConstraint: NSLayoutConstraint?
+
     // Event monitor for keyboard shortcuts
     private var keyMonitor: Any?
 
@@ -50,6 +54,13 @@ class BrowserWindowController: NSWindowController {
 
         // Window delegate
         self.window?.delegate = self
+
+        // Observe image-contextmenu messages from webviews to show native Save menu
+        NotificationCenter.default.addObserver(self, selector: #selector(imageContextMenuRequested(_:)), name: Notification.Name("Vaaka.ContextMenuImage"), object: nil)
+
+        // Observe downloads model updates
+        NotificationCenter.default.addObserver(self, selector: #selector(downloadsChanged(_:)), name: Notification.Name("Vaaka.DownloadsChanged"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(downloadUpdated(_:)), name: Notification.Name("Vaaka.DownloadUpdated"), object: nil)
 
         // Keyboard shortcuts
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] evt in
@@ -119,6 +130,7 @@ class BrowserWindowController: NSWindowController {
 
         content.addSubview(railContainer)
         content.addSubview(contentContainer)
+        content.addSubview(downloadsBar)
         railContainer.addSubview(railScrollView)
 
         NSLayoutConstraint.activate([
@@ -139,6 +151,11 @@ class BrowserWindowController: NSWindowController {
             contentContainer.topAnchor.constraint(equalTo: content.topAnchor),
             contentContainer.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
+            // Downloads bar pinned to bottom and initially hidden (height 0)
+            downloadsBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            downloadsBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            downloadsBar.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+
             // constraints for docView and stack
             railStackView.leadingAnchor.constraint(equalTo: docView.leadingAnchor),
             railStackView.trailingAnchor.constraint(equalTo: docView.trailingAnchor),
@@ -155,8 +172,15 @@ class BrowserWindowController: NSWindowController {
             docView.widthAnchor.constraint(equalTo: railScrollView.widthAnchor)
         ])
 
+        // Downloads bar initial height constraint (hidden)
+        downloadsBarHeightConstraint = downloadsBar.heightAnchor.constraint(equalToConstant: 0)
+        downloadsBarHeightConstraint?.isActive = true
+
         // Initial empty state view if no sites
         updateEmptyStateIfNeeded()
+
+        // Apply initial downloads state
+        updateDownloadsBar(animated: false)
     }
 
     // MARK: - UI updates
@@ -330,6 +354,50 @@ class BrowserWindowController: NSWindowController {
         guard let id = note.object as? String else { return }
         for case let item as RailItemView in railStackView.arrangedSubviews where item.site.id == id {
             item.setLoading(true)
+        }
+    }
+
+    // MARK: - Downloads
+    @objc private func downloadsChanged(_ note: Notification) {
+        updateDownloadsBar(animated: true)
+    }
+
+    @objc private func downloadUpdated(_ note: Notification) {
+        updateDownloadsBar(animated: false)
+    }
+
+    private var hideDownloadsWorkItem: DispatchWorkItem?
+
+    private func updateDownloadsBar(animated: Bool) {
+        let items = DownloadsManager.shared.allItems()
+        let visible = !items.isEmpty
+
+        // Update content of bar
+        downloadsBar.apply(items: items)
+
+        // Animate height
+        let target: CGFloat = visible ? 84 : 0
+        downloadsBarHeightConstraint?.constant = target
+        if animated {
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.2
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                self.window?.contentView?.layoutSubtreeIfNeeded()
+            }, completionHandler: nil)
+        } else {
+            self.window?.contentView?.layoutSubtreeIfNeeded()
+        }
+
+        // Auto-hide when no in-progress items after a delay
+        hideDownloadsWorkItem?.cancel()
+        if !visible { return }
+        // If there are no in-progress items, schedule a hide after 5s
+        if items.first(where: { $0.status == .inProgress }) == nil {
+            let wi = DispatchWorkItem { [weak self] in
+                self?.updateDownloadsBar(animated: true)
+            }
+            hideDownloadsWorkItem = wi
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: wi)
         }
     }
 
@@ -516,6 +584,77 @@ class BrowserWindowController: NSWindowController {
 
     @objc private func openSiteSettings(_ sender: NSMenuItem) {
         openPreferences()
+    }
+
+    // Image context menu support
+    @objc private func imageContextMenuRequested(_ note: Notification) {
+        guard let info = note.userInfo, let siteId = info["siteId"] as? String, let src = info["src"] as? String else { return }
+        // Show a small menu at the current mouse location offering Save / Copy URL
+        guard let win = self.window, let content = win.contentView else { return }
+        let menu = NSMenu(title: "Image")
+        let save = NSMenuItem(title: "Save Image As…", action: #selector(saveImageAs(_:)), keyEquivalent: "")
+        save.representedObject = ["siteId": siteId, "src": src]
+        menu.addItem(save)
+        let copy = NSMenuItem(title: "Copy Image URL", action: #selector(copyImageURL(_:)), keyEquivalent: "")
+        copy.representedObject = src
+        menu.addItem(copy)
+        if let event = NSApp.currentEvent {
+            NSMenu.popUpContextMenu(menu, with: event, for: content)
+        } else {
+            // fallback: center of window
+            let loc = NSPoint(x: win.frame.midX, y: win.frame.midY)
+            NSMenu.popUpContextMenu(menu, with: NSEvent.mouseEvent(with: .rightMouseDown, location: loc, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: win.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!, for: content)
+        }
+    }
+
+    @objc private func copyImageURL(_ sender: NSMenuItem) {
+        guard let src = sender.representedObject as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(src, forType: .string)
+    }
+
+    @objc private func saveImageAs(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: String], let src = info["src"], let siteId = info["siteId"] else { return }
+
+        // Determine suggested filename
+        var suggested = URL(string: src)?.lastPathComponent ?? "image"
+        if suggested.isEmpty { suggested = "image" }
+
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggested
+        panel.canCreateDirectories = true
+        guard let win = self.window else { return }
+        panel.beginSheetModal(for: win) { resp in
+            if resp == .OK, let dest = panel.url {
+                // Kick off a direct download using URLSession so it's robust even when the WebView doesn't create a WKDownload
+                self.performImageDownload(from: src, to: dest, siteId: siteId)
+            }
+        }
+    }
+
+    private func performImageDownload(from src: String, to destination: URL, siteId: String) {
+        // Handle data: URLs specially
+        if src.hasPrefix("data:") {
+            if let comma = src.firstIndex(of: ",") {
+                let meta = String(src[src.index(src.startIndex, offsetBy: 5)..<comma])
+                let isBase64 = meta.contains("base64")
+                let payload = String(src[src.index(after: comma)...])
+                if let data = isBase64 ? Data(base64Encoded: payload) : payload.data(using: .utf8) {
+                    do {
+                        try data.write(to: destination)
+                        NSWorkspace.shared.activateFileViewerSelecting([destination])
+                    } catch {
+                        let alert = NSAlert(error: error)
+                        if let win = self.window { alert.beginSheetModal(for: win, completionHandler: nil) } else { alert.runModal() }
+                    }
+                }
+            }
+            return
+        }
+
+        guard let url = URL(string: src) else { return }
+        // Use DownloadsManager to start the external download (tracks progress / reveal / cancel)
+        DownloadsManager.shared.startExternalDownload(from: url, suggestedFilename: destination.lastPathComponent, destination: destination, siteId: siteId)
     }
 
     // MARK: - Helpers

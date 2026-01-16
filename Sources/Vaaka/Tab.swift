@@ -5,7 +5,8 @@ import AppKit
 /// Represents a loaded Site tab: one `WKWebView` per `Site`.
 final class SiteTab: NSObject {
     let site: Site
-    let webView: WKWebView
+    var webView: WKWebView
+
     // Keep a strong reference to the navigation delegate used to enforce whitelist
     var navigationDelegateStored: WKNavigationDelegate?
     var uiDelegateStored: WKUIDelegate?
@@ -32,15 +33,11 @@ final class SiteTab: NSObject {
         #if DEBUG
         configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
         #endif
-        self.webView = WKWebView(frame: .zero, configuration: configuration)
+        self.webView = SiteTab.makeWebView(configuration: configuration)
         super.init()
-        // Ensure every WebView presents itself with a Safari-like User-Agent so servers and scripts
-        // that inspect navigator.userAgent or perform UA-based content negotiation treat us like Safari.
-        self.webView.customUserAgent = UserAgent.safari
 
-        // Inject notification interception and badge detection per-tab
+        // Add user scripts and message handlers bound to this SiteTab instance
         let ucc = self.webView.configuration.userContentController
-
 
         // Always inject badge detection (works even without simulation)
         let badgeScript = WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
@@ -59,6 +56,17 @@ final class SiteTab: NSObject {
             self.badgeHandler = badgeHandler
             ucc.add(badgeHandler, name: "badgeUpdate")
         }
+
+        // Add notification message handler to support the Notification interceptor script
+        let nHandler = NotificationMessageHandler(siteTab: self)
+        self.notificationHandler = nHandler
+        ucc.add(nHandler, name: "notificationRequest")
+
+        // Context menu interceptor to enable native Save Image handling
+        let ctxScript = WKUserScript(source: ContextMenuInterceptor.script, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        ucc.addUserScript(ctxScript)
+        let ctxHandler = ContextMenuHandler(siteTab: self)
+        ucc.add(ctxHandler, name: "contextMenu")
 
             // Observe start events for this site so we can cancel watchdogs
         NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: nil, queue: .main) { [weak self] note in
@@ -146,6 +154,239 @@ final class SiteTab: NSObject {
         notificationHandler = nil
         consoleHandler = nil
         lastNotificationTimes.removeAll()
+    }
+
+    // Create a fresh WKWebView with the provided configuration. This centralizes creation so
+    // we can recreate web views after content process termination/crashes.
+    private static func makeWebView(configuration: WKWebViewConfiguration) -> WKWebView {
+        let w = WKWebView(frame: .zero, configuration: configuration)
+        w.customUserAgent = UserAgent.safari
+        w.translatesAutoresizingMaskIntoConstraints = false
+        return w
+    }
+
+    /// Called when the web content process terminates/crashes. Attempt a graceful in-app recovery
+    /// by replacing the WKWebView with a fresh instance using the same configuration, re-adding
+    /// user scripts and message handlers, and restoring the last-known URL. If recovery fails,
+    /// we fall back to opening externally after a short timeout.
+    func handleContentProcessTermination() {
+        DispatchQueue.main.async {
+            Logger.shared.debug("[DEBUG] webContentProcessDidTerminate for site: \(self.site.name)")
+
+            // Make the tab active so the user can see recovery progress
+            if let idx = SiteTabManager.shared.tabs.firstIndex(where: { $0.site.id == self.site.id }) {
+                SiteTabManager.shared.setActiveIndex(idx)
+            }
+
+            // Create new webview based on previous configuration
+            let old = self.webView
+            let new = SiteTab.makeWebView(configuration: old.configuration)
+
+            // Reinstall user scripts / handlers bound to this SiteTab
+            let ucc = new.configuration.userContentController
+            let badgeScript = WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
+            ucc.addUserScript(badgeScript)
+            let consoleScript = WKUserScript(source: ConsoleForwarder.script, injectionTime: .atDocumentStart, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
+            ucc.addUserScript(consoleScript)
+
+            let cHandler = ConsoleMessageHandler(siteTab: self)
+            self.consoleHandler = cHandler
+            ucc.add(cHandler, name: "consoleMessage")
+
+            if self.badgeHandler == nil {
+                let badgeHandler = BadgeUpdateHandler(siteTab: self)
+                self.badgeHandler = badgeHandler
+                ucc.add(badgeHandler, name: "badgeUpdate")
+            }
+
+            let nHandler = NotificationMessageHandler(siteTab: self)
+            self.notificationHandler = nHandler
+            ucc.add(nHandler, name: "notificationRequest")
+
+            // Reinstall context menu interceptor
+            let ctxScript = WKUserScript(source: ContextMenuInterceptor.script, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+            ucc.addUserScript(ctxScript)
+            let ctxHandler = ContextMenuHandler(siteTab: self)
+            ucc.add(ctxHandler, name: "contextMenu")
+
+            // Copy delegates so whitelist / window.open handling continues to work
+            if let nav = self.navigationDelegateStored { new.navigationDelegate = nav }
+            if let ui = self.uiDelegateStored { new.uiDelegate = ui }
+
+            // Insert into existing superview to preserve layout
+            if let sv = old.superview {
+                sv.addSubview(new)
+                NSLayoutConstraint.activate([
+                    new.leadingAnchor.constraint(equalTo: sv.leadingAnchor),
+                    new.trailingAnchor.constraint(equalTo: sv.trailingAnchor),
+                    new.topAnchor.constraint(equalTo: sv.topAnchor),
+                    new.bottomAnchor.constraint(equalTo: sv.bottomAnchor)
+                ])
+                new.isHidden = old.isHidden
+                old.removeFromSuperview()
+            }
+
+            // Replace the property so callers see the fresh webView
+            self.webView = new
+
+            // Attempt to restore last URL (if known) or the site's start URL
+            var restoreURL: URL? = nil
+            if let lastStr = UserDefaults.standard.string(forKey: "Vaaka.LastURL.\(self.site.id)"), let lastURL = URL(string: lastStr), SiteManager.hostMatches(host: lastURL.host, siteHost: self.site.url.host) {
+                restoreURL = lastURL
+            }
+            if restoreURL == nil { restoreURL = self.site.url }
+
+            if let u = restoreURL {
+                _ = self.webView.load(URLRequest(url: u))
+            }
+
+            // Start a short watchdog: if the new webview doesn't show content in `stuckTimeout`, open externally
+            let stuckTimeout: TimeInterval = 8.0
+            let finalWi = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                if self.webView.url == nil {
+                    Logger.shared.debug("[DEBUG] content process recovery failed; opening externally for site \(self.site.name)")
+                    NSWorkspace.shared.open(self.site.url)
+                    NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: self.site.id)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + stuckTimeout, execute: finalWi)
+        }
+    }
+
+    // Active downloads for this tab: keep strong references to per-download handlers
+    private var activeDownloadHandlers: [ObjectIdentifier: SiteDownloadHandler] = [:]
+
+    func registerDownloadHandler(_ handler: SiteDownloadHandler, for download: WKDownload) {
+        activeDownloadHandlers[ObjectIdentifier(download)] = handler
+    }
+
+    func unregisterDownloadHandler(for download: WKDownload) {
+        activeDownloadHandlers.removeValue(forKey: ObjectIdentifier(download))
+    }
+
+    // Responsible for managing a single WKDownload's lifecycle on behalf of a SiteTab.
+    class SiteDownloadHandler: NSObject, WKDownloadDelegate, Cancellable {
+        private weak var siteTab: SiteTab?
+        private weak var download: WKDownload?
+
+        init(siteTab: SiteTab, download: WKDownload) {
+            self.siteTab = siteTab
+            self.download = download
+            super.init()
+        }
+
+        deinit {
+            // Clean up registration if still present
+            if let d = download {
+                siteTab?.unregisterDownloadHandler(for: d)
+            }
+        }
+
+
+
+        var downloadId: String?
+
+        @MainActor
+        func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {
+            // Default destination suggestion
+            let fm = FileManager.default
+            let downloadsURL = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            var proposed = downloadsURL?.appendingPathComponent(suggestedFilename)
+
+            // Ensure we don't clobber an existing file
+            if let p = proposed {
+                var candidate = p
+                var idx = 1
+                while fm.fileExists(atPath: candidate.path) {
+                    let base = p.deletingPathExtension().lastPathComponent
+                    let ext = p.pathExtension
+                    let name = ext.isEmpty ? "\(base)-\(idx)" : "\(base)-\(idx).\(ext)"
+                    candidate = p.deletingLastPathComponent().appendingPathComponent(name)
+                    idx += 1
+                }
+                proposed = candidate
+            }
+
+            // Register an item in DownloadsManager so UI can show it immediately
+            let id = UUID().uuidString
+            self.downloadId = id
+            DownloadsManager.shared.addExternalDownload(id: id, siteId: self.siteTab?.site.id ?? "", sourceURL: response.url, suggestedFilename: suggestedFilename, destination: proposed, taskIdentifier: nil)
+            DownloadsManager.shared.registerCancellable(id: id, self)
+
+            // If there is a key window, present a save panel and await user's destination choice
+            if let win = NSApp.keyWindow {
+                return await withCheckedContinuation { (cont: CheckedContinuation<URL?, Never>) in
+                    let panel = NSSavePanel()
+                    panel.nameFieldStringValue = proposed?.lastPathComponent ?? suggestedFilename
+                    panel.canCreateDirectories = true
+                    panel.beginSheetModal(for: win) { resp in
+                        if resp == .OK, let dest = panel.url {
+                            DownloadsManager.shared.setDestination(id: id, destination: dest)
+                            cont.resume(returning: dest)
+                        } else {
+                            cont.resume(returning: nil)
+                        }
+                    }
+                }
+            }
+
+            return proposed
+        }
+        func downloadDidFinish(_ download: WKDownload) {
+            DispatchQueue.main.async {
+                Logger.shared.debug("[DEBUG] Download finished for site: \(self.siteTab?.site.name ?? "<unknown>")")
+                // If we know the destination from the decideDestination step, reveal it.
+                if let id = self.downloadId, let item = DownloadsManager.shared.allItems().first(where: { $0.id == id }), let dest = item.destinationURL {
+                    NSWorkspace.shared.activateFileViewerSelecting([dest])
+                } else if let fm = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
+                    NSWorkspace.shared.activateFileViewerSelecting([fm])
+                }
+                if let d = self.download {
+                    self.siteTab?.unregisterDownloadHandler(for: d)
+                }
+                // Mark complete in manager if we previously registered an id
+                if let id = self.downloadId {
+                    DownloadsManager.shared.complete(id: id, destination: nil)
+                    DownloadsManager.shared.unregisterCancellable(id: id)
+                }
+            }
+        }
+
+        func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+            DispatchQueue.main.async {
+                Logger.shared.log("[ERROR] Download failed for site: \(self.siteTab?.site.name ?? "<unknown>") error=\(error)")
+                // Inform user with an alert
+                let alert = NSAlert()
+                alert.messageText = "Download failed"
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: "OK")
+                if let win = NSApp.keyWindow {
+                    alert.beginSheetModal(for: win, completionHandler: nil)
+                } else {
+                    alert.runModal()
+                }
+                if let d = self.download {
+                    self.siteTab?.unregisterDownloadHandler(for: d)
+                }
+                if let id = self.downloadId {
+                    DownloadsManager.shared.fail(id: id, error: error)
+                    DownloadsManager.shared.unregisterCancellable(id: id)
+                }
+            }
+        }
+
+
+
+        func download(_ download: WKDownload, didWriteData totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+            guard let id = self.downloadId else { return }
+            let progress = totalBytesExpectedToWrite > 0 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) : 0.0
+            DownloadsManager.shared.updateProgress(id: id, progress: progress)
+        }
+
+        func cancelDownload() {
+            download?.cancel()
+        }
     }
 
     /// Load the site's start URL if it hasn't been loaded already. Safe to call multiple times.
