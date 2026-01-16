@@ -8,6 +8,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Ensure sites are loaded from settings (bundled or persisted)
         SiteManager.shared.loadSites()
 
+        // Initialize developer logger (creates log directory/file on first write) and write startup info
+        Logger.shared.debug("[DEBUG] Vaaka starting - PID=\(ProcessInfo.processInfo.processIdentifier) bundleId=\(Bundle.main.bundleIdentifier ?? "<nil>")")
+
         // Refresh favicons periodically (every 7 days)
         SiteManager.shared.refreshFaviconsIfNeeded()
 

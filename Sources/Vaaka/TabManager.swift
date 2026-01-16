@@ -82,10 +82,6 @@ final class SiteTabManager: NSObject {
 
             let userContent = WKUserContentController()
             userContent.add(ErrorMessageHandler(siteId: site.id), name: "vaakaError")
-            userContent.add(NotificationMessageHandler(site: site), name: "vaakaNotification")
-            // Inject script to intercept Notification API
-            let script = WKUserScript(source: notificationInjectionScript, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-            userContent.addUserScript(script)
             // Add tracker-blocking rules if the feature is enabled and compiled
             ContentBlockerManager.shared.addTo(userContentController: userContent)
             config.userContentController = userContent
@@ -284,65 +280,5 @@ private final class SelfUIDelegate: NSObject, WKUIDelegate {
         }
     }
 }
-// MARK: - Notification Message Handler
-private final class NotificationMessageHandler: NSObject, WKScriptMessageHandler {
-    private let site: Site
 
-    init(site: Site) {
-        self.site = site
-    }
 
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any] else { return }
-        guard let title = body["title"] as? String else { return }
-        let bodyText = body["body"] as? String ?? ""
-
-        // Check if notifications are enabled for this site
-        guard NotificationManager.shared.isEnabledForSite(site.id) else {
-            return
-        }
-        // If this site is not the active one, mark as unread
-        let isActive = (SiteTabManager.shared.activeTab()?.site.id == site.id)
-        if !isActive {
-            UnreadManager.shared.increment(for: site.id)
-        }
-        NotificationManager.shared.sendNotification(title: title, body: bodyText, siteId: site.id)
-    }
-}
-
-// MARK: - JavaScript for Notification Interception
-private let notificationInjectionScript = """
-(function() {
-    // Store the original Notification constructor
-    const OriginalNotification = window.Notification;
-    
-    // Override the Notification constructor
-    window.Notification = class Notification extends OriginalNotification {
-        constructor(title, options = {}) {
-            // Create a dummy notification (don't actually show it since we'll handle it natively)
-            super(title, { ...options, silent: true });
-            
-            // Send to native handler
-            window.webkit.messageHandlers.vaakaNotification.postMessage({
-                title: title,
-                body: options.body || ""
-            });
-            
-            return this;
-        }
-        
-        static get permission() {
-            return OriginalNotification.permission;
-        }
-        
-        static requestPermission(callback) {
-            return OriginalNotification.requestPermission(callback);
-        }
-    };
-    
-    // Copy static properties
-    Object.defineProperty(window.Notification, 'permission', {
-        get() { return OriginalNotification.permission; }
-    });
-})();
-"""

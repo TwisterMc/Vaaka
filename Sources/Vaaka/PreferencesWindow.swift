@@ -18,6 +18,8 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     private var importEasyButton: NSButton?
     // Last-updated display
     private var lastUpdatedLabel: NSTextField?
+    // Dev Logs sheet removed; 'Show Dev Logs' now opens the log file in Finder
+
     convenience init() {
         let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 640, height: 360), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Settings"
@@ -263,12 +265,20 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         enableNotifications.state = UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal") ? .on : .off
         enableNotifications.toolTip = "Allow websites to send system notifications"
 
+        // Dev-mode controls (notification simulation removed from UI; simulation still occurs for unbundled builds)
+        // (Inject-scripts option removed from UI; injection now follows Notifications enabled state)
+
+
         // Favicon refresh button
         let refreshFaviconsButton = NSButton(title: "Refresh Favicons", target: self, action: #selector(refreshFavicons))
         refreshFaviconsButton.bezelStyle = .rounded
         refreshFaviconsButton.toolTip = "Fetch fresh favicons for all sites"
 
-        let generalStack = NSStackView(views: [generalHeader, darkModeRow, enableNotifications, refreshFaviconsButton])
+        let showLogsButton = NSButton(title: "Show Dev Logs", target: self, action: #selector(showDevLogs))
+        showLogsButton.bezelStyle = .rounded
+        showLogsButton.toolTip = "Open the developer logs (tail of ~/Library/Logs/Vaaka.log)"
+
+        let generalStack = NSStackView(views: [generalHeader, darkModeRow, enableNotifications, refreshFaviconsButton, showLogsButton])
         generalStack.orientation = .vertical
         generalStack.alignment = .leading
         generalStack.spacing = 10
@@ -376,9 +386,11 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
 
     @objc private func toggleNotifications(_ sender: NSButton) {
         let on = sender.state == .on
+        Logger.shared.debug("[DEBUG] Preferences.toggleNotifications: user toggled to \(on ? "on" : "off")")
         // Use NotificationManager to handle permission flow and prefs
         if on {
             NotificationManager.shared.setGlobalEnabled(true) { granted in
+                Logger.shared.debug("[DEBUG] Preferences.toggleNotifications: setGlobalEnabled completion granted=\(granted)")
                 DispatchQueue.main.async {
                     if granted {
                         sender.state = .on
@@ -388,7 +400,8 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
                 }
             }
         } else {
-            NotificationManager.shared.setGlobalEnabled(false) { _ in
+            NotificationManager.shared.setGlobalEnabled(false) { success in
+                Logger.shared.debug("[DEBUG] Preferences.toggleNotifications: setGlobalEnabled disabled success=\(success)")
                 DispatchQueue.main.async { sender.state = .off }
             }
         }
@@ -399,9 +412,11 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         guard row >= 0, row < SiteManager.shared.sites.count else { return }
         let site = SiteManager.shared.sites[row]
         let enabling = sender.state == .on
+        Logger.shared.debug("[DEBUG] Preferences.toggleSiteNotification: site=\(site.id) enabling=\(enabling)")
 
         if enabling {
             NotificationManager.shared.requestPermission { granted in
+                Logger.shared.debug("[DEBUG] Preferences.toggleSiteNotification: requestPermission granted=\(granted) for site=\(site.id)")
                 DispatchQueue.main.async {
                     if granted {
                         NotificationManager.shared.setEnabled(true, forSite: site.id)
@@ -417,9 +432,20 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         }
     }
 
+    // Notification simulation toggle removed from preferences UI.
+    // full-frame script injection toggle removed — injection is now automatic when website notifications are enabled.
+
+
+
     @objc private func refreshFavicons() {
-        print("[DEBUG] Forcing favicon refresh for all sites")
+        Logger.shared.debug("[DEBUG] Forcing favicon refresh for all sites")
         SiteManager.shared.refreshAllFavicons()
+    }
+
+    // MARK: - Dev Logs
+    @objc private func showDevLogs() {
+        // Open the log file in Finder for easy access
+        NSWorkspace.shared.activateFileViewerSelecting([Logger.shared.logFileURL])
     }
 
     @objc private func darkModeChanged(_ sender: NSPopUpButton) {
@@ -764,3 +790,6 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         win.appearance = AppearanceManager.shared.effectiveAppearance
     }
 }
+
+// Developer logs sheet removed — use the 'Show Dev Logs' button to open the log file in Finder instead.
+

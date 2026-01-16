@@ -10,6 +10,14 @@ final class SiteTab: NSObject {
     var navigationDelegateStored: WKNavigationDelegate?
     var uiDelegateStored: WKUIDelegate?
 
+    // Message handlers (keep strong references to prevent deallocation)
+    private var notificationHandler: NotificationMessageHandler?
+    private var badgeHandler: BadgeUpdateHandler?
+    private var consoleHandler: ConsoleMessageHandler?
+
+    // Deduplication tracking for notifications
+    var lastNotificationTimes: [String: Date] = [:]
+
     private var hasLoadedStartURL: Bool = false
     private var loadingWatchdogWorkItem: DispatchWorkItem?
     private var navigationStuckWorkItem: DispatchWorkItem?
@@ -20,11 +28,37 @@ final class SiteTab: NSObject {
 
     init(site: Site, configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
         self.site = site
+        // Enable Web Inspector in DEBUG builds only
+        #if DEBUG
+        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        #endif
         self.webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         // Ensure every WebView presents itself with a Safari-like User-Agent so servers and scripts
         // that inspect navigator.userAgent or perform UA-based content negotiation treat us like Safari.
         self.webView.customUserAgent = UserAgent.safari
+
+        // Inject notification interception and badge detection per-tab
+        let ucc = self.webView.configuration.userContentController
+
+
+        // Always inject badge detection (works even without simulation)
+        let badgeScript = WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
+        ucc.addUserScript(badgeScript)
+
+        // Inject console forwarder to capture JS console/error messages (helps when the Web Inspector is broken)
+        let consoleScript = WKUserScript(source: ConsoleForwarder.script, injectionTime: .atDocumentStart, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
+        ucc.addUserScript(consoleScript)
+        let cHandler = ConsoleMessageHandler(siteTab: self)
+        self.consoleHandler = cHandler
+        ucc.add(cHandler, name: "consoleMessage")
+
+        // If a badge handler wasn't created above (simulation disabled), register a lightweight one
+        if self.badgeHandler == nil {
+            let badgeHandler = BadgeUpdateHandler(siteTab: self)
+            self.badgeHandler = badgeHandler
+            ucc.add(badgeHandler, name: "badgeUpdate")
+        }
 
             // Observe start events for this site so we can cancel watchdogs
         NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: nil, queue: .main) { [weak self] note in
@@ -97,6 +131,21 @@ final class SiteTab: NSObject {
     deinit {
         loadingWatchdogWorkItem?.cancel()
         NotificationCenter.default.removeObserver(self)
+        // Clean up injected script message handlers if present
+        let ucc = webView.configuration.userContentController
+        if badgeHandler != nil {
+            ucc.removeScriptMessageHandler(forName: "badgeUpdate")
+        }
+        if notificationHandler != nil {
+            ucc.removeScriptMessageHandler(forName: "notificationRequest")
+        }
+        if consoleHandler != nil {
+            ucc.removeScriptMessageHandler(forName: "consoleMessage")
+        }
+        badgeHandler = nil
+        notificationHandler = nil
+        consoleHandler = nil
+        lastNotificationTimes.removeAll()
     }
 
     /// Load the site's start URL if it hasn't been loaded already. Safe to call multiple times.
@@ -216,4 +265,6 @@ final class SiteTab: NSObject {
         }
     }
 }
+
+
 

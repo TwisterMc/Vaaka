@@ -14,25 +14,28 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private func ensureCenter(completion: (() -> Void)? = nil) {
         // If already initialized, run completion and return
         if center != nil {
+            Logger.shared.debug("[DEBUG] ensureCenter: center already initialized")
             completion?()
             return
         }
 
         // Ensure we perform initialization on main thread
         if !Thread.isMainThread {
+            Logger.shared.debug("[DEBUG] ensureCenter: not on main thread, dispatching")
             DispatchQueue.main.async { self.ensureCenter(completion: completion) }
             return
         }
 
         // In unit-test contexts notifications aren't available
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
-            print("[DEBUG] Running in test context, notifications not available")
+            Logger.shared.debug("[DEBUG] Running in test context, notifications not available")
             completion?()
             return
         }
 
         // Only initialize after app is fully running
         guard NSApp.isRunning else {
+            Logger.shared.debug("[DEBUG] ensureCenter: NSApp not running yet, retrying shortly")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 self?.ensureCenter(completion: completion)
             }
@@ -44,22 +47,28 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     /// Request user permission for notifications
     func requestPermission(completion: @escaping (Bool) -> Void) {
+        Logger.shared.debug("[DEBUG] requestPermission called")
         ensureCenter { [weak self] in
-            guard let self = self else { completion(false); return }
+            guard let self = self else { Logger.shared.debug("[DEBUG] requestPermission: self became nil"); completion(false); return }
             // If center couldn't be initialized, treat as unavailable
-            guard let center = self.center else { completion(false); return }
+            guard let center = self.center else { Logger.shared.debug("[DEBUG] requestPermission: notification center unavailable"); completion(false); return }
 
             // Check existing settings first
             center.getNotificationSettings { settings in
+                Logger.shared.debug("[DEBUG] requestPermission: current authorizationStatus = \(settings.authorizationStatus.rawValue)")
                 switch settings.authorizationStatus {
                 case .notDetermined:
+                    print("[DEBUG] requestPermission: requesting authorization")
                     center.requestAuthorization(options: [.alert, .sound]) { granted, error in
                         if let error = error {
-                            print("[ERROR] Notification permission request failed: \(error)")
+                            Logger.shared.log("[ERROR] Notification permission request failed: \(error)")
+                        } else {
+                            Logger.shared.debug("[DEBUG] Notification permission request result: granted=\(granted)")
                         }
                         DispatchQueue.main.async { completion(granted) }
                     }
                 case .denied:
+                    print("[DEBUG] requestPermission: authorization previously denied")
                     // Present a user-facing prompt guiding the user to enable notifications
                     DispatchQueue.main.async {
                         let alert = NSAlert()
@@ -89,8 +98,10 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                         }
                     }
                 case .authorized, .provisional, .ephemeral:
+                    print("[DEBUG] requestPermission: already authorized")
                     DispatchQueue.main.async { completion(true) }
                 @unknown default:
+                    print("[DEBUG] requestPermission: unknown authorization status")
                     DispatchQueue.main.async { completion(false) }
                 }
             }
@@ -98,18 +109,18 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Send a notification using UserNotifications framework
-    func sendNotification(title: String, body: String, siteId: String) {
+    func sendNotification(title: String, body: String, siteId: String, jsNotificationId: String? = nil) {
         // Check if notifications are globally enabled (opt-in: default to disabled if key doesn't exist)
         let globalEnabled = UserDefaults.standard.object(forKey: "Vaaka.NotificationsEnabledGlobal") as? Bool ?? false
-        guard globalEnabled else { return }
+        guard globalEnabled else { print("[DEBUG] sendNotification: global notifications disabled"); return }
 
         // Check if notifications are enabled for this site (opt-in: default to disabled)
-        guard isEnabledForSite(siteId) else { return }
+        guard isEnabledForSite(siteId) else { print("[DEBUG] sendNotification: notifications disabled for site \(siteId)"); return }
 
         // Ensure center exists - if initialization cannot complete, skip
         ensureCenter { [weak self] in
-            guard let self = self else { return }
-            guard let center = self.center else { return }
+            guard let self = self else { print("[DEBUG] sendNotification: self nil"); return }
+            guard let center = self.center else { print("[DEBUG] sendNotification: notification center unavailable"); return }
 
             DispatchQueue.main.async {
                 let content = UNMutableNotificationContent()
@@ -117,13 +128,15 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                 content.body = body
                 content.sound = .default
                 content.threadIdentifier = siteId
+                if let jsId = jsNotificationId { content.userInfo["vaaka.notificationId"] = jsId }
 
-                let request = UNNotificationRequest(identifier: "vaaka.\(siteId).\(UUID().uuidString)", content: content, trigger: nil)
+                let identifier = "vaaka.\(siteId).\(jsNotificationId ?? UUID().uuidString)"
+                let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
                 center.add(request) { error in
                     if let error = error {
                         print("[ERROR] Failed to schedule notification: \(error)")
                     } else {
-                        print("[DEBUG] Notification sent for site: \(siteId)")
+                        print("[DEBUG] Notification sent for site: \(siteId) id=\(jsNotificationId ?? "<none>")")
                     }
                 }
             }
@@ -144,8 +157,13 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let key = "Vaaka.NotificationsEnabled.\(siteId)"
         defaults.set(enabled, forKey: key)
 
-        // If enabling, ensure we have system permission; if not, revert the setting
+        // If enabling, ensure we have system permission; if not, revert the setting.
+        // When running without a bundle identifier (e.g., via `swift run`/tests), we cannot request system permission — in that case persist the pref but do not attempt to request.
         if enabled {
+            if Bundle.main.bundleIdentifier == nil {
+                print("[WARN] No bundle identifier; saved per-site notification preference but cannot request system permission in this environment")
+                return
+            }
             requestPermission { granted in
                 if !granted {
                     DispatchQueue.main.async {
@@ -162,6 +180,14 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let key = "Vaaka.NotificationsEnabledGlobal"
 
         if enabled {
+            // If running without a bundle ID (development), persist pref but cannot request system permission here
+            if Bundle.main.bundleIdentifier == nil {
+                defaults.set(true, forKey: key)
+                print("[WARN] No bundle identifier; saved global notification preference but cannot request system permission in this environment")
+                completion?(true)
+                return
+            }
+
             // Request permission; persist only if granted
             requestPermission { granted in
                 DispatchQueue.main.async {
@@ -185,6 +211,28 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         completionHandler([.banner, .sound])
     }
 
+    // Handle a user interacting with a delivered notification (click)
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        let content = response.notification.request.content
+        let siteId = content.threadIdentifier
+        let jsId = content.userInfo["vaaka.notificationId"] as? String
+
+        Logger.shared.debug("[DEBUG] Notification clicked - site=\(siteId) id=\(jsId ?? "<none>")")
+
+        // Attempt to find the tab for this site and invoke the JS onclick handler
+        if let tab = SiteTabManager.shared.tabs.first(where: { $0.site.id == siteId }) {
+            if let jsNotificationId = jsId {
+                let js = "try { if (window.__vaaka_notifications && window.__vaaka_notifications['\(jsNotificationId)'] && typeof window.__vaaka_notifications['\(jsNotificationId)'].onclick === 'function') { window.__vaaka_notifications['\(jsNotificationId)'].onclick(); } } catch(e) { console.error(e); }"
+                DispatchQueue.main.async {
+                    tab.webView.evaluateJavaScript(js) { _, err in
+                        if let err = err { Logger.shared.debug("[DEBUG] Failed to call onclick in webview: \(err)") }
+                    }
+                }
+            }
+        }
+
+        completionHandler()
+    }
     private func initializeCenter(completion: (() -> Void)?) {
         guard self.center == nil else {
             completion?()
@@ -193,18 +241,20 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         
         // Wrap in autoreleasepool and check for valid bundle
         autoreleasepool {
-            guard Bundle.main.bundleIdentifier != nil else {
-                print("[WARN] No bundle identifier, skipping notification center")
+            let bid = Bundle.main.bundleIdentifier
+            Logger.shared.debug("[DEBUG] initializeCenter: bundle identifier = \(bid ?? "<nil>")")
+            guard bid != nil else {
+                Logger.shared.debug("[WARN] No bundle identifier, skipping notification center")
                 completion?()
                 return
             }
-            
+
             let c = UNUserNotificationCenter.current()
             c.delegate = self
             self.center = c
-            print("[DEBUG] Notification center initialized")
+            Logger.shared.debug("[DEBUG] Notification center initialized")
         }
-        
+
         completion?()
     }
 }

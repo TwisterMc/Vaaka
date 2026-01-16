@@ -34,4 +34,12 @@ final class UnreadManager {
             NotificationCenter.default.post(name: .UnreadChanged, object: siteId)
         }
     }
+
+    /// Set unread count for a site (overwrites existing value)
+    func set(_ count: Int, for siteId: String) {
+        queue.sync { counts[siteId] = max(0, count) }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .UnreadChanged, object: siteId)
+        }
+    }
 }
