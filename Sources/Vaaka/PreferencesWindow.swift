@@ -9,10 +9,11 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     private var generalPane: NSView?
     private var privacyPane: NSView?
     private var appearancePane: NSView?
+    private var devPane: NSView?
     private var splitStack: NSStackView?
     // Sidebar source-list
     private var sidebarTable: NSTableView?
-    private let sidebarItems = ["Sites", "General", "Privacy"]
+    private let sidebarItems = ["Sites", "General", "Privacy", "Dev"]
     // Remote update helper UI
     private var remoteStatusLabel: NSTextField?
     private var importEasyButton: NSButton?
@@ -269,7 +270,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         // (Inject-scripts option removed from UI; injection now follows Notifications enabled state)
 
 
-        // Favicon refresh button
+        // Favicon refresh button (moved to Dev pane)
         let refreshFaviconsButton = NSButton(title: "Refresh Favicons", target: self, action: #selector(refreshFavicons))
         refreshFaviconsButton.bezelStyle = .rounded
         refreshFaviconsButton.toolTip = "Fetch fresh favicons for all sites"
@@ -278,7 +279,8 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         showLogsButton.bezelStyle = .rounded
         showLogsButton.toolTip = "Open the developer logs (tail of ~/Library/Logs/Vaaka.log)"
 
-        let generalStack = NSStackView(views: [generalHeader, darkModeRow, enableNotifications, refreshFaviconsButton, showLogsButton])
+        // General stack (no longer contains the Dev-only controls)
+        let generalStack = NSStackView(views: [generalHeader, darkModeRow, enableNotifications])
         generalStack.orientation = .vertical
         generalStack.alignment = .leading
         generalStack.spacing = 10
@@ -288,17 +290,50 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             generalStack.leadingAnchor.constraint(equalTo: generalPane.leadingAnchor, constant: 12),
             generalStack.trailingAnchor.constraint(equalTo: generalPane.trailingAnchor, constant: -12),
             generalStack.topAnchor.constraint(equalTo: generalPane.topAnchor, constant: 12),
-            generalStack.bottomAnchor.constraint(equalTo: generalPane.bottomAnchor, constant: -12)
+            generalStack.bottomAnchor.constraint(lessThanOrEqualTo: generalPane.bottomAnchor, constant: -12)
+        ])
+
+        // Dev pane (developer-facing tools)
+        let devPane = NSView()
+        devPane.translatesAutoresizingMaskIntoConstraints = false
+        let devHeader = NSTextField(labelWithString: "Developer")
+        devHeader.font = NSFont.boldSystemFont(ofSize: 13)
+        devHeader.textColor = NSColor.labelColor
+        devHeader.alignment = .left
+
+        let devStack = NSStackView(views: [devHeader, refreshFaviconsButton, showLogsButton])
+        devStack.orientation = .vertical
+        devStack.alignment = .leading
+        devStack.spacing = 10
+        devStack.translatesAutoresizingMaskIntoConstraints = false
+        devPane.addSubview(devStack)
+        NSLayoutConstraint.activate([
+            devStack.leadingAnchor.constraint(equalTo: devPane.leadingAnchor, constant: 12),
+            devStack.trailingAnchor.constraint(equalTo: devPane.trailingAnchor, constant: -12),
+            devStack.topAnchor.constraint(equalTo: devPane.topAnchor, constant: 12),
+            devStack.bottomAnchor.constraint(lessThanOrEqualTo: devPane.bottomAnchor, constant: -12)
+        ])
+
+        detailContainer.addSubview(devPane)
+        devPane.translatesAutoresizingMaskIntoConstraints = false
+        devPane.isHidden = true
+        NSLayoutConstraint.activate([
+            devPane.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
+            devPane.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
+            devPane.topAnchor.constraint(equalTo: detailContainer.topAnchor),
+            devPane.bottomAnchor.constraint(equalTo: detailContainer.bottomAnchor)
         ])
 
         detailContainer.addSubview(sitesPane)
         detailContainer.addSubview(generalPane)
         detailContainer.addSubview(privacyPane)
+        // devPane was added above and is already a subview of detailContainer
         privacyPane.isHidden = true
         generalPane.isHidden = true
         sitesPane.translatesAutoresizingMaskIntoConstraints = false
         generalPane.translatesAutoresizingMaskIntoConstraints = false
         privacyPane.translatesAutoresizingMaskIntoConstraints = false
+        // devPane already has translatesAutoresizingMaskIntoConstraints set where it was created
         NSLayoutConstraint.activate([
             sitesPane.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor),
             sitesPane.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor),
@@ -335,6 +370,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         self.generalPane = generalPane
         self.appearancePane = sitesPane
         self.privacyPane = privacyPane
+        self.devPane = devPane
         self.detailPane = generalPane
 
         // local actions and references
@@ -506,7 +542,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     }
 
     // MARK: - Settings-style sidebar helpers
-    private enum PrefPane { case sites, general, privacy }
+    private enum PrefPane { case sites, general, privacy, dev }
 
     @objc private func sidebarTableClicked(_ sender: Any?) {
         guard let tv = sidebarTable else { return }
@@ -515,7 +551,9 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             switch row {
             case 0: selectPane(.sites)
             case 1: selectPane(.general)
-            default: selectPane(.privacy)
+            case 2: selectPane(.privacy)
+            case 3: selectPane(.dev)
+            default: selectPane(.sites)
             }
         }
     }
@@ -527,22 +565,32 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             generalPane?.isHidden = true
             appearancePane?.isHidden = false  // appearancePane stores sitesPane
             privacyPane?.isHidden = true
+            devPane?.isHidden = true
             sidebarTable?.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         case .general:
             generalPane?.isHidden = false
             appearancePane?.isHidden = true
             privacyPane?.isHidden = true
+            devPane?.isHidden = true
             sidebarTable?.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
         case .privacy:
             generalPane?.isHidden = true
             appearancePane?.isHidden = true
             privacyPane?.isHidden = false
+            devPane?.isHidden = true
             sidebarTable?.selectRowIndexes(IndexSet(integer: 2), byExtendingSelection: false)
+        case .dev:
+            generalPane?.isHidden = true
+            appearancePane?.isHidden = true
+            privacyPane?.isHidden = true
+            devPane?.isHidden = false
+            sidebarTable?.selectRowIndexes(IndexSet(integer: 3), byExtendingSelection: false)
         }
         switch pane {
         case .sites: detailPane = appearancePane  // appearancePane stores sitesPane
         case .general: detailPane = generalPane
         case .privacy: detailPane = privacyPane
+        case .dev: detailPane = devPane
         }
     }
 
@@ -576,7 +624,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             }
         } else if tv == self.sidebarTable {
             let row = sidebarTable?.selectedRow ?? -1
-            if row == 0 { selectPane(.sites) } else if row == 1 { selectPane(.general) } else if row == 2 { selectPane(.privacy) }
+            if row == 0 { selectPane(.sites) } else if row == 1 { selectPane(.general) } else if row == 2 { selectPane(.privacy) } else if row == 3 { selectPane(.dev) }
         }
     }
 
