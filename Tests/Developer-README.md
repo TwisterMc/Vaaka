@@ -5,7 +5,7 @@
 Requirements:
 
 - macOS 14.0 or later
-- Swift 5.9+
+- Swift 6 or later
 
 ```bash
 git clone <repo-url>
@@ -61,6 +61,36 @@ Enable "Block Trackers & Ads" in Settings to automatically block known ad networ
 
 - macOS 14.0 or later
 - Apple Silicon (M1+) or Intel (Monterey+)
+
+## Testing
+
+### Running tests
+
+- Tests require macOS and **Xcode** so the `XCTest` framework and macOS SDK (AppKit/WebKit) are available.
+- Run tests locally with:
+
+```bash
+swift test
+```
+
+or open the project in Xcode and run tests from the Test navigator.
+
+- To run a single test you can use:
+
+```bash
+swift test --filter TestClassName/testMethodName
+```
+
+- Ensure a `.testTarget` (e.g. `VaakaTests`) is declared in `Package.swift` so SwiftPM discovers your tests.
+
+### Continuous Integration (CI)
+
+- Our CI workflow (`.github/workflows/ci.yml`) runs on `macos-15` and executes `swift test` (so it has Xcode installed).
+- If you add Linux-friendly tests, consider adding a Linux job to the workflow and keep macOS-only tests gated by platform checks.
+
+### Note to GitHub Copilot
+
+- **NOTE:** GitHub Copilot must NOT commit code directly. Any code changes suggested by Copilot require explicit human review and a maintainer's commit.
 
 ## Contributing
 
