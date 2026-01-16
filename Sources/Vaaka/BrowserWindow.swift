@@ -1639,7 +1639,10 @@ class TabOverviewItemView: NSView {
         NSCursor.pointingHand.push()
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.15
-            self.layer?.borderColor = NSColor.controlAccentColor.cgColor
+            // Don't override keyboard-selected highlight
+            if !self.isSelected {
+                self.layer?.borderColor = NSColor.controlAccentColor.cgColor
+            }
             self.layer?.shadowOpacity = 0.4
         })
     }
@@ -1663,12 +1666,12 @@ class TabOverviewItemView: NSView {
     func setSelected(_ selected: Bool) {
         isSelected = selected
         if selected {
-            // Focused state: thick white/light border with strong glow
+            // Focused state: thick green border with strong glow (consistent in light/dark)
             NSAnimationContext.runAnimationGroup({ context in
                 context.duration = 0.15
-                self.layer?.borderWidth = 5
-                self.layer?.borderColor = NSColor.white.cgColor
-                self.layer?.shadowColor = NSColor.controlAccentColor.cgColor
+                self.layer?.borderWidth = 3
+                self.layer?.borderColor = NSColor.systemGreen.cgColor
+                self.layer?.shadowColor = NSColor.systemGreen.cgColor
                 self.layer?.shadowOpacity = 0.8
                 self.layer?.shadowRadius = 12
             })
