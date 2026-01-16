@@ -386,9 +386,13 @@ class BrowserWindowController: NSWindowController {
 
     // MARK: - Keyboard handling
     private func handleKeyEvent(_ evt: NSEvent) -> NSEvent? {
-        // Cmd+T for Tab Overview
+        // Cmd+T for Tab Overview — toggle overview when pressed
         if evt.modifierFlags.contains(.command) && evt.charactersIgnoringModifiers == "t" {
-            tabOverviewClicked()
+            if tabOverviewView != nil {
+                hideTabOverview()
+            } else {
+                tabOverviewClicked()
+            }
             return nil
         }
         
@@ -425,7 +429,11 @@ class BrowserWindowController: NSWindowController {
     }
     
     @objc func tabOverviewClicked(_ sender: Any? = nil) {
-        showTabOverview()
+        if tabOverviewView != nil {
+            hideTabOverview()
+        } else {
+            showTabOverview()
+        }
     }
     
     private var tabOverviewView: TabOverviewView?
