@@ -40,3 +40,8 @@ It's not signed because I don't want to pay Apple the fee for a developer accoun
 
 - macOS 14.0 or later
 - Apple Silicon (M1+) or Intel
+
+## Donate
+
+If you find Vaaka useful and would like to support its development, consider [making a donation](https://ko-fi.com/twistermc).
+Every bit helps and is greatly appreciated!
