@@ -169,6 +169,11 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
                 return decisionHandler(.allow)
             }
 
+            // If the link target actually belongs to the same site (including registrable root), allow it in-app
+            if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
+                return decisionHandler(.allow)
+            }
+
             // If the link looks like an SSO/IdP target, open externally by default to avoid embedded-browser failures.
             let isSSO = SSODetector.isSSO(url)
             if isSSO {

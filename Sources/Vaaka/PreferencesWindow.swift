@@ -705,6 +705,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { setError(nil); tf.stringValue = "" }
                 return
             }
+            // Store the exact normalized URL the user entered (e.g., mail.google.com will create a mail.google.com site)
             let host = normalized.host ?? normalized.absoluteString
             let firstLabel = host.split(separator: ".").first.map { String($0).capitalized } ?? host
             var s = SiteManager.shared.sites
@@ -738,7 +739,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
             if let normalized = SiteManager.normalizedURL(from: urlStr) {
                 // accepted
                 setError(nil)
-                // Only update if host changed
+                // Store the exact normalized host the user entered (so the tab opens at that host)
                 if normalized.host != original.url.host {
                     let host = normalized.host ?? normalized.absoluteString
                     let firstLabel = host.split(separator: ".").first.map { String($0).capitalized } ?? host

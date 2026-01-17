@@ -67,4 +67,19 @@ final class VaakaTests: XCTestCase {
         XCTAssertEqual(after.count, 1)
         XCTAssertEqual(after[0].id, "A")
     }
+
+    func testRootDomainHeuristic() throws {
+        XCTAssertEqual(SiteManager.rootDomain(for: "mail.google.com"), "google.com")
+        XCTAssertEqual(SiteManager.rootDomain(for: "google.com"), "google.com")
+        XCTAssertEqual(SiteManager.rootDomain(for: "sub.example.co.uk"), "example.co.uk")
+        XCTAssertEqual(SiteManager.rootDomain(for: "a.b.c.d.example.com"), "example.com")
+    }
+
+    func testHostMatchingWithSubdomainSite() throws {
+        // If a site is added as a specific subdomain, other subdomains of the same root should still match
+        XCTAssertTrue(SiteManager.hostMatches(host: "accounts.google.com", siteHost: "mail.google.com"))
+        XCTAssertTrue(SiteManager.hostMatches(host: "mail.google.com", siteHost: "mail.google.com"))
+        XCTAssertTrue(SiteManager.hostMatches(host: "sub.example.co.uk", siteHost: "mail.example.co.uk"))
+        XCTAssertFalse(SiteManager.hostMatches(host: "evil.com", siteHost: "mail.google.com"))
+    }
 }

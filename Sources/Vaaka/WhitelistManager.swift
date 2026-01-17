@@ -105,11 +105,36 @@ final class SiteManager {
         return h
     }
 
+    /// Return a best-effort registrable/root domain for a host string. This is a heuristic
+    /// that works for common cases: it returns the last two labels (eg. "google.com")
+    /// but will include an extra label for common country-code TLDs (eg. "co.uk" -> take last 3 labels).
+    static func rootDomain(for host: String?) -> String? {
+        guard let canonical = canonicalHost(host) else { return nil }
+        let parts = canonical.split(separator: ".")
+        if parts.count <= 2 { return canonical }
+        // If a likely ccTLD (two-letter last label), include one more label (e.g., example.co.uk -> example.co.uk)
+        if let last = parts.last, last.count == 2, parts.count >= 3 {
+            return parts.suffix(3).joined(separator: ".")
+        }
+        return parts.suffix(2).joined(separator: ".")
+    }
+
     /// Returns true if `host` belongs to `siteHost` domain (ex: sub.example.com matches example.com).
+    ///
+    /// Enhanced behavior: if a site was configured as a specific subdomain (eg. "mail.google.com"),
+    /// we still want other registrable subdomains of the same root (eg. "accounts.google.com") to be
+    /// considered allowed. To support that without changing the stored site URL, we also compare
+    /// against the site's root domain when checking matches.
     static func hostMatches(host: String?, siteHost: String?) -> Bool {
         guard let h = canonicalHost(host), let s = canonicalHost(siteHost) else { return false }
+        // Direct match or subdomain of siteHost
         if h == s { return true }
         if h.hasSuffix("." + s) { return true }
+        // Also allow matches against the site's root domain (eg. siteHost "mail.google.com" -> root "google.com")
+        if let siteRoot = rootDomain(for: s) {
+            if h == siteRoot { return true }
+            if h.hasSuffix("." + siteRoot) { return true }
+        }
         return false
     }
 
