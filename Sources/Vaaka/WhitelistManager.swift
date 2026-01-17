@@ -2,6 +2,7 @@ import Foundation
 
 extension Notification.Name {
     static let SitesChanged = Notification.Name("Vaaka.SitesChanged")
+    static let FaviconSaved = Notification.Name("Vaaka.FaviconSaved")
 }
 
 /// A site configuration for Vaaka. One `Site` maps to exactly one vertical tab.

@@ -51,7 +51,7 @@ class BrowserWindowController: NSWindowController {
 
         // Observe appearance changes
         NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
-
+            NotificationCenter.default.addObserver(self, selector: #selector(faviconSaved(_:)), name: .FaviconSaved, object: nil)
         // Window delegate
         self.window?.delegate = self
 
@@ -364,6 +364,13 @@ class BrowserWindowController: NSWindowController {
 
     @objc private func downloadUpdated(_ note: Notification) {
         updateDownloadsBar(animated: false)
+    }
+
+    @objc private func faviconSaved(_ note: Notification) {
+        // Rebuild rail to pick up new favicon resources (per-item handlers also update immediately)
+        DispatchQueue.main.async {
+            self.rebuildRailButtons()
+        }
     }
 
     private var hideDownloadsWorkItem: DispatchWorkItem?
@@ -841,6 +848,10 @@ class BrowserWindowController: NSWindowController {
             // Initial badge state
             self.updateBadge()
             NotificationCenter.default.addObserver(self, selector: #selector(unreadChanged(_:)), name: .UnreadChanged, object: nil)
+            // Update overview favicon when saved
+            NotificationCenter.default.addObserver(self, selector: #selector(faviconSaved(_:)), name: .FaviconSaved, object: nil)
+            // Update favicon immediately when saved
+            NotificationCenter.default.addObserver(self, selector: #selector(faviconSaved(_:)), name: .FaviconSaved, object: nil)
 
             // Load favicon (SVG preferred, PNG allowed, generated fallback)
             if let name = site.favicon {
@@ -879,6 +890,18 @@ class BrowserWindowController: NSWindowController {
         @objc private func unreadChanged(_ note: Notification) {
             guard let siteId = note.object as? String, siteId == site.id else { return }
             updateBadge()
+        }
+
+        @objc private func faviconSaved(_ note: Notification) {
+            guard let info = note.userInfo as? [String: Any], let siteId = info["siteId"] as? String, siteId == site.id else { return }
+            guard let fname = info["filename"] as? String else { return }
+            if let img = FaviconFetcher.shared.image(forResource: fname) {
+                DispatchQueue.main.async {
+                    self.applyImage(img, reason: "faviconSaved:loaded:")
+                    self.setImageHidden(false, reason: "faviconSaved:ensure-visible")
+                    self.setImageAlpha(1.0, reason: "faviconSaved:set-alpha-1")
+                }
+            }
         }
 
         private func updateBadge() {
@@ -930,21 +953,19 @@ class BrowserWindowController: NSWindowController {
                 spinner.isHidden = false
                 spinner.alphaValue = 0.0
                 spinner.startAnimation(nil)
-                // cross-fade
+                // Bring up spinner without hiding the favicon to avoid flicker between navigations
                 NSAnimationContext.runAnimationGroup({ ctx in
                     ctx.duration = 0.18
-                    imageView.animator().alphaValue = 0.0
                     spinner.animator().alphaValue = 1.0
-                }, completionHandler: {
-                    self.setImageHidden(true, reason: "setLoading:start:anim-complete")
-                })
+                    // keep imageView alpha unchanged so cached favicon remains visible while loading
+                }, completionHandler: nil)
 
                 // Schedule a fallback in case loading stalls: show a mono icon and stop spinner after a short timeout
                 let work = DispatchWorkItem { [weak self] in
                     guard let self = self else { return }
                     if self.spinner.isHidden == false {
-                        // Apply fallback
-                        if let host = self.site.url.host {
+                        // Only apply fallback if there's no image currently displayed (avoid overwriting cached favicon)
+                        if self.imageView.image == nil, let host = self.site.url.host {
                             self.applyImage(FaviconFetcher.shared.generateMonoIcon(for: host), reason: "loadingTimeout:applied-fallback-mono-for:\(host)")
                             self.setImageHidden(false, reason: "loadingTimeout:ensure-visible")
                             self.setImageAlpha(1.0, reason: "loadingTimeout:set-alpha-1")
@@ -960,19 +981,26 @@ class BrowserWindowController: NSWindowController {
                 NSAccessibility.post(element: self, notification: .announcementRequested, userInfo: [NSAccessibility.NotificationUserInfoKey.announcement: "\(site.name) loaded", NSAccessibility.NotificationUserInfoKey.priority: NSAccessibilityPriorityLevel.low])
 
                 // Ensure we have the most up-to-date favicon image (in case it changed while loading)
+                var appliedImage: NSImage? = nil
                 if let name = site.favicon, let img = FaviconFetcher.shared.image(forResource: name) {
-                    self.applyImage(img, reason: "setLoading:refresh-resource:\(name)")
-                } else if let host = site.url.host {
-                    self.applyImage(FaviconFetcher.shared.generateMonoIcon(for: host), reason: "setLoading:generated-mono-for:\(host)")
+                    appliedImage = img
+                } else if self.imageView.image == nil, let host = site.url.host {
+                    // Only fallback to mono icon if no image currently shown
+                    appliedImage = FaviconFetcher.shared.generateMonoIcon(for: host)
                 }
 
-                self.setImageHidden(false, reason: "setLoading:finish:ensure-visible")
-                self.setImageAlpha(0.0, reason: "setLoading:finish:alpha-0")
-                // cross-fade back
+                if let img = appliedImage {
+                    self.applyImage(img, reason: "setLoading:refresh-resource-or-fallback")
+                }
+
+                // If we applied a new image, ensure it is visible. Otherwise keep the currently visible favicon intact.
+                if appliedImage != nil {
+                    self.setImageHidden(false, reason: "setLoading:finish:ensure-visible")
+                }
+                // Fade spinner away and leave the favicon as-is (avoid re-fading favicon to prevent flicker)
                 NSAnimationContext.runAnimationGroup({ ctx in
                     ctx.duration = 0.18
                     spinner.animator().alphaValue = 0.0
-                    imageView.animator().alphaValue = 1.0
                 }, completionHandler: {
                     self.spinner.stopAnimation(nil)
                     self.spinner.isHidden = true
@@ -1620,6 +1648,9 @@ class TabOverviewItemView: NSView {
         } else if let host = tab.site.url.host {
             faviconView.image = FaviconFetcher.shared.generateMonoIcon(for: host)
         }
+
+        // Observe favicon saves to update this overview item's favicon when it becomes available
+        NotificationCenter.default.addObserver(self, selector: #selector(faviconSaved(_:)), name: .FaviconSaved, object: nil)
         
         // Title
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1681,6 +1712,16 @@ class TabOverviewItemView: NSView {
 
         // Ensure colors match the current effective appearance
         updateAppearance()
+    }
+
+    @objc private func faviconSaved(_ note: Notification) {
+        guard let info = note.userInfo as? [String: Any], let siteId = info["siteId"] as? String, siteId == tab.site.id else { return }
+        guard let fname = info["filename"] as? String else { return }
+        if let img = FaviconFetcher.shared.image(forResource: fname) {
+            DispatchQueue.main.async {
+                self.faviconView.image = img
+            }
+        }
     }
 
     override func viewDidChangeEffectiveAppearance() {

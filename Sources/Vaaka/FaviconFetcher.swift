@@ -327,6 +327,8 @@ class FaviconFetcher {
             if let savedImage = NSImage(data: data) {
                 cache.setObject(savedImage, forKey: fname as NSString)
             }
+            // Notify listeners that a favicon was saved for this site so UI can update immediately
+            NotificationCenter.default.post(name: .FaviconSaved, object: nil, userInfo: ["siteId": siteID, "filename": fname])
             return fname
         } catch {
             try? FileManager.default.removeItem(at: temp)
