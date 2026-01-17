@@ -2,6 +2,8 @@
 
 Vaaka is a macOS browser built for focus and efficiency. It replaces traditional tab management with a fixed, predefined site list that you configure in settings. Each whitelisted site gets one tab on the left sidebar. Leaving the whitelisted sites opens your default browser. No address bar, no mess of tabs, just the sites you whitelist.
 
+![Vaaka Screenshot](screenshot.png)
+
 ## Vaaka - "Vah-kah" (Finnish)
 
 Means "scale" or "balance."
