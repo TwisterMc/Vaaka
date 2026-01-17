@@ -68,6 +68,22 @@ final class VaakaTests: XCTestCase {
         XCTAssertEqual(after[0].id, "A")
     }
 
+    func testSiteTabUpdatesSiteMetadata() throws {
+        // Ensure existing SiteTab instance receives updated Site metadata when replaceSites is called
+        let site = Site(id: "meta-test", name: "MetaTest", url: URL(string: "https://meta.example.com")!, favicon: nil)
+        SiteManager.shared.replaceSites([site])
+        let initialTab = SiteTabManager.shared.tabs.first
+        XCTAssertNotNil(initialTab)
+        // Update site with a favicon
+        let updated = Site(id: "meta-test", name: "MetaTest", url: URL(string: "https://meta.example.com")!, favicon: "meta-test.png")
+        SiteManager.shared.replaceSites([updated])
+        let afterTab = SiteTabManager.shared.tabs.first
+        XCTAssertNotNil(afterTab)
+        XCTAssertEqual(afterTab?.site.favicon, "meta-test.png")
+        // Ensure the original SiteTab instance was reused (same object identity)
+        XCTAssertTrue(initialTab === afterTab)
+    }
+
     func testRootDomainHeuristic() throws {
         XCTAssertEqual(SiteManager.rootDomain(for: "mail.google.com"), "google.com")
         XCTAssertEqual(SiteManager.rootDomain(for: "google.com"), "google.com")

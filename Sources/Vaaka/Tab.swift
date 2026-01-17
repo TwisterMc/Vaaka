@@ -4,7 +4,7 @@ import AppKit
 
 /// Represents a loaded Site tab: one `WKWebView` per `Site`.
 final class SiteTab: NSObject {
-    let site: Site
+    var site: Site
     var webView: WKWebView
 
     // Keep a strong reference to the navigation delegate used to enforce whitelist

@@ -69,6 +69,8 @@ final class SiteTabManager: NSObject {
 
         for site in sites {
             if let existing = existingById[site.id] {
+                // Update the existing tab's Site value in case metadata (favicon, name) changed
+                existing.site = site
                 newTabs.append(existing)
                 // Remove from existingById map — remaining entries will be considered removed
                 existingById.removeValue(forKey: site.id)
