@@ -27,6 +27,10 @@ final class SiteTab: NSObject {
     // the WebView during the initial load; this flag lets us re-hide it after navigation actually starts.
     private var temporarilyUnhiddenForLoad: Bool = false
 
+    // Timer used to refresh dynamic favicons (e.g., Google Calendar daily favicon)
+    private var faviconRefreshTimer: DispatchSourceTimer?
+
+
     init(site: Site, configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
         self.site = site
         // Enable Web Inspector in DEBUG builds only
@@ -85,6 +89,9 @@ final class SiteTab: NSObject {
                 self.webView.isHidden = true
             }
 
+            // If a favicon refresh timer is running, stop it while navigation is in progress
+            self.stopFaviconRefresh()
+
             self.navigationStuckWorkItem?.cancel()
             let stuckTimeout: TimeInterval = ProcessInfo.processInfo.arguments.contains("--test-short-wd") ? 5.0 : 20.0
             let wi = DispatchWorkItem { [weak self] in
@@ -129,6 +136,9 @@ final class SiteTab: NSObject {
             self.navigationStuckWorkItem?.cancel()
             self.navigationStuckWorkItem = nil
             self.navigationInProgress = false
+
+            // After navigation completes, start dynamic favicon refresh if appropriate
+            self.startFaviconRefreshIfNeeded()
         }
 
         // Do not load the start URL immediately — wait until the WebView is attached to the window/content view.
@@ -154,6 +164,7 @@ final class SiteTab: NSObject {
         notificationHandler = nil
         consoleHandler = nil
         lastNotificationTimes.removeAll()
+        stopFaviconRefresh()
     }
 
     // Create a fresh WKWebView with the provided configuration. This centralizes creation so
@@ -450,6 +461,75 @@ final class SiteTab: NSObject {
         webView.evaluateJavaScript(js)
     }
 
+    // MARK: - Dynamic favicon refresh (e.g., Google Calendar daily icon changes)
+    private func startFaviconRefreshIfNeeded() {
+        // Determine the effective URL to check (prefer current webView URL)
+        let effectiveURL = webView.url ?? site.url
+        guard DynamicFaviconManager.shared.shouldRefreshFavicon(for: effectiveURL), let interval = DynamicFaviconManager.shared.refreshInterval(for: effectiveURL) else {
+            return
+        }
+        // Avoid starting multiple timers
+        if faviconRefreshTimer != nil { return }
+
+        // Fire immediately with a scheduled reschedule for the next interval (midnight-friendly)
+        refreshDynamicFavicon()
+
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + interval, leeway: .seconds(30))
+        timer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            self.refreshDynamicFavicon()
+            // Cancel and reschedule to recompute next interval (handles DST and calendar edges)
+            self.stopFaviconRefresh()
+            self.startFaviconRefreshIfNeeded()
+        }
+        faviconRefreshTimer = timer
+        timer.resume()
+    }
+
+    private func refreshDynamicFavicon() {
+        // Avoid refreshing while navigation is in progress
+        guard !webView.isLoading else { return }
+
+        FaviconFetcher.shared.captureLiveFavicon(from: webView) { [weak self] image in
+            guard let self = self, let image = image else { return }
+
+            // Convert to PNG and compare to existing on-disk image to avoid unnecessary writes/notifications
+            guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let data = rep.representation(using: .png, properties: [:]) else {
+                // Still notify UI with the captured image
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: Notification.Name("Vaaka.FaviconDidUpdate"), object: self.site.id, userInfo: ["image": image])
+                }
+                return
+            }
+
+            let targetURL = FaviconFetcher.shared.faviconsDir.appendingPathComponent("\(self.site.id).png")
+            if let existing = try? Data(contentsOf: targetURL), existing == data {
+                // No change — still notify so views can pick it up if needed
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: Notification.Name("Vaaka.FaviconDidUpdate"), object: self.site.id, userInfo: ["image": image])
+                }
+                return
+            }
+
+            // Save and notify (saveImage will post .FaviconSaved too)
+            if let _ = FaviconFetcher.shared.saveImage(image, forSiteID: self.site.id) {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: Notification.Name("Vaaka.FaviconDidUpdate"), object: self.site.id, userInfo: ["image": image])
+                }
+            } else {
+                // If save failed, still notify UI with the in-memory image
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: Notification.Name("Vaaka.FaviconDidUpdate"), object: self.site.id, userInfo: ["image": image])
+                }
+            }
+        }
+    }
+
+    private func stopFaviconRefresh() {
+        faviconRefreshTimer?.cancel()
+        faviconRefreshTimer = nil
+    }
     /// Display an internal error page for the current site with Retry / Open in Browser / Dismiss buttons.
     func showErrorPage(errorDescription: String, failedURL: String, displayHost: String? = nil) {
         func escape(_ s: String) -> String {

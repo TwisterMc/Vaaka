@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ImageIO
+import WebKit
 
 class FaviconFetcher {
     static let shared = FaviconFetcher()
@@ -351,6 +352,75 @@ class FaviconFetcher {
                 self.cache.setObject(img, forKey: name as NSString)
             }
             completion(img)
+        }
+    }
+
+    /// Attempt to capture the favicon currently referenced by the page (via <link rel="icon">) or an inline data: URI.
+    /// Calls completion on the calling queue (main thread expected for UI use).
+    func captureLiveFavicon(from webView: WKWebView, completion: @escaping (NSImage?) -> Void) {
+        // Run JS on main thread per WKWebView requirements
+        DispatchQueue.main.async {
+            let script = """
+            (function() {
+                'use strict';
+                const iconLink = document.querySelector('link[rel*="icon"]');
+                return iconLink?.href?.slice(0, 10000) || '';
+            })();
+            """
+
+            webView.evaluateJavaScript(script) { result, error in
+                guard let urlString = result as? String,
+                      !urlString.isEmpty,
+                      urlString.count < 10000 else {
+                    completion(nil)
+                    return
+                }
+
+                // Handle data URI (may contain commas in metadata so join everything after first comma)
+                if urlString.hasPrefix("data:image/") {
+                    guard let commaIndex = urlString.firstIndex(of: ",") else { return completion(nil) }
+                    let meta = String(urlString[urlString.index(urlString.startIndex, offsetBy: 5)..<commaIndex])
+                    let payload = String(urlString[urlString.index(after: commaIndex)...])
+                    let isBase64 = meta.contains("base64")
+                    // Safety caps
+                    guard payload.count < 1_000_000 else { return completion(nil) }
+                    if isBase64 {
+                        if let imageData = Data(base64Encoded: payload), imageData.count < 500_000, let image = NSImage(data: imageData) {
+                            completion(image)
+                        } else {
+                            completion(nil)
+                        }
+                    } else {
+                        if let data = payload.data(using: .utf8), data.count < 500_000, let image = NSImage(data: data) {
+                            completion(image)
+                        } else {
+                            completion(nil)
+                        }
+                    }
+                    return
+                }
+
+                guard let url = URL(string: urlString), let scheme = url.scheme?.lowercased(), (scheme == "https" || scheme == "http") else {
+                    completion(nil)
+                    return
+                }
+
+                var req = URLRequest(url: url)
+                req.timeoutInterval = 10
+                // Use the same User-Agent as other fetches to improve compatibility
+                req.setValue(UserAgent.safari, forHTTPHeaderField: "User-Agent")
+                // Limit concurrent connections via configured session
+                let task = self.session.dataTask(with: req) { data, response, err in
+                    guard let data = data, err == nil, data.count < 500_000, let image = NSImage(data: data) else {
+                        completion(nil)
+                        return
+                    }
+                    DispatchQueue.main.async {
+                        completion(image)
+                    }
+                }
+                task.resume()
+            }
         }
     }
 

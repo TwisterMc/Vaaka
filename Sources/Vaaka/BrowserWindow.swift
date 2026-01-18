@@ -862,6 +862,9 @@ class BrowserWindowController: NSWindowController {
             // Update favicon immediately when saved
             NotificationCenter.default.addObserver(self, selector: #selector(faviconSaved(_:)), name: .FaviconSaved, object: nil)
 
+            // Listen for dynamic favicon updates specifically for this site
+            NotificationCenter.default.addObserver(self, selector: #selector(faviconDidUpdate(_:)), name: Notification.Name("Vaaka.FaviconDidUpdate"), object: site.id)
+
             // Load favicon (SVG preferred, PNG allowed, generated fallback)
             if let name = site.favicon {
                 // Try to load from disk, or fetch from web as fallback
@@ -911,6 +914,19 @@ class BrowserWindowController: NSWindowController {
                     self.setImageAlpha(1.0, reason: "faviconSaved:set-alpha-1")
                 }
             }
+        }
+
+        @objc private func faviconDidUpdate(_ note: Notification) {
+            guard let image = note.userInfo?["image"] as? NSImage else { return }
+            DispatchQueue.main.async {
+                self.applyImage(image, reason: "dynamic-favicon-update")
+                self.setImageHidden(false, reason: "dynamic-favicon-update")
+                self.setImageAlpha(1.0, reason: "dynamic-favicon-update")
+            }
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
         }
 
         private func updateBadge() {
