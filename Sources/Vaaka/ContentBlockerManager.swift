@@ -39,12 +39,14 @@ final class ContentBlockerManager {
         // Load any locally persisted rules (from remote updates) preferentially
         if let local = loadPersistedRules() {
             WKContentRuleListStore.default().compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: local) { [weak self] (list, error) in
-                if error != nil {
+                if let err = error {
+                    Logger.shared.debug("[DEBUG][ContentBlocker] compile persisted rules failed: \(err)")
                     self?.compileBuiltin()
                     return
                 }
-                guard let l = list else { self?.compileBuiltin(); return }
+                guard let l = list else { Logger.shared.debug("[DEBUG][ContentBlocker] compile returned no list; using builtin"); self?.compileBuiltin(); return }
                 self?.compiled = l
+                Logger.shared.debug("[DEBUG][ContentBlocker] compiled persisted rules and applying to existing tabs")
                 DispatchQueue.main.async { self?.applyToExistingTabs(l) }
             }
             return
@@ -55,13 +57,19 @@ final class ContentBlockerManager {
     private func compileBuiltin() {
         let rules = defaultRulesJSON()
         WKContentRuleListStore.default().compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: rules) { [weak self] (list, error) in
-            guard let l = list else { return }
+            if let err = error {
+                Logger.shared.debug("[DEBUG][ContentBlocker] compile builtin failed: \(err)")
+                return
+            }
+            guard let l = list else { Logger.shared.debug("[DEBUG][ContentBlocker] compile builtin returned no list"); return }
             self?.compiled = l
+            Logger.shared.debug("[DEBUG][ContentBlocker] compiled builtin rules and applying to existing tabs")
             DispatchQueue.main.async { self?.applyToExistingTabs(l) }
         }
     }
 
     private func applyToExistingTabs(_ l: WKContentRuleList) {
+        Logger.shared.debug("[DEBUG][ContentBlocker] applying compiled rules to \(SiteTabManager.shared.tabs.count) tabs")
         for tab in SiteTabManager.shared.tabs {
             tab.webView.configuration.userContentController.add(l)
         }
@@ -210,9 +218,14 @@ final class ContentBlockerManager {
     }
 
     // MARK: - Last-updated helpers
+    // Notification published when blocker rules are updated (e.g., successful EasyList import)
+    static let ContentBlockerDidUpdate = Notification.Name("Vaaka.ContentBlockerDidUpdate")
+
     private func updateLastUpdated(_ date: Date) {
         let iso = ISO8601DateFormatter().string(from: date)
         UserDefaults.standard.set(iso, forKey: "Vaaka.BlockerEasyListLastUpdated")
+        // Notify UI that the last-updated value changed
+        DispatchQueue.main.async { NotificationCenter.default.post(name: Self.ContentBlockerDidUpdate, object: nil) }
     }
 
     func lastUpdatedString() -> String? {

@@ -32,6 +32,8 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         super.init(window: window)
         // Observe appearance changes
         NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
+        // Observe content-blocker updates to refresh the Last Updated label
+        NotificationCenter.default.addObserver(self, selector: #selector(contentBlockerDidUpdate(_:)), name: ContentBlockerManager.ContentBlockerDidUpdate, object: nil)
         // Apply appearance preference
         applyAppearance()
     }
@@ -378,6 +380,17 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         sendDNT.target = self
         importEasy.target = self
         self.importEasyButton = importEasy
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: ContentBlockerManager.ContentBlockerDidUpdate, object: nil)
+    }
+
+    @objc private func contentBlockerDidUpdate(_ n: Notification) {
+        DispatchQueue.main.async {
+            self.lastUpdatedLabel?.stringValue = "Last updated: " + (ContentBlockerManager.shared.lastUpdatedString() ?? "Never")
+        }
     }
 
     // MARK: - Actions
