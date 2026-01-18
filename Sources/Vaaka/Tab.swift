@@ -41,8 +41,9 @@ final class SiteTab: NSObject {
 
         // Create fresh configuration for this tab
         let configuration = WKWebViewConfiguration()
-        // Use an ephemeral data store per tab to isolate cookies/storage
-        configuration.websiteDataStore = WKWebsiteDataStore.nonPersistent()
+        // Use the persistent default data store so cookies and local storage are preserved across app launches
+        // (previously used nonPersistent during debugging; switch back to default to preserve cookie consent choices)
+        configuration.websiteDataStore = WKWebsiteDataStore.default()
         let webpagePreferences = WKWebpagePreferences()
         webpagePreferences.allowsContentJavaScript = true
         configuration.defaultWebpagePreferences = webpagePreferences
@@ -224,8 +225,8 @@ final class SiteTab: NSObject {
             // Create new webview with a fresh configuration (avoid reusing old.configuration which can cause state sharing)
             let old = self.webView
             let newConfig = WKWebViewConfiguration()
-            // Use an ephemeral data store for recovered webviews to avoid sharing site state
-            newConfig.websiteDataStore = WKWebsiteDataStore.nonPersistent()
+            // Use the persistent default data store for recovered webviews so cookies/localStorage are preserved
+            newConfig.websiteDataStore = WKWebsiteDataStore.default()
             let webpagePreferences = WKWebpagePreferences()
             webpagePreferences.allowsContentJavaScript = true
             newConfig.defaultWebpagePreferences = webpagePreferences
