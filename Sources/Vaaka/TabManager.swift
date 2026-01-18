@@ -29,11 +29,8 @@ final class SiteTabManager: NSObject {
         didSet {
             NotificationCenter.default.post(name: .ActiveTabChanged, object: self)
             persistLastActiveSite()
-            // Mark active site as read (clear unread count)
-            if activeIndex >= 0 && activeIndex < tabs.count {
-                let siteId = tabs[activeIndex].site.id
-                UnreadManager.shared.clear(for: siteId)
-            }
+            // NOTE: Do not automatically clear unread counts when a tab becomes active.
+            // Unread counts are now preserved until explicitly cleared by user action.
         }
     }
 

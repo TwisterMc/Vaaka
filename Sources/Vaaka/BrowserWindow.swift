@@ -216,10 +216,7 @@ class BrowserWindowController: NSWindowController {
             self.updateRailSelection(activeIndex: idx)
             self.setActiveWebViewVisibility(index: idx)
             self.updateWindowTitleForActiveTab()
-            // Clear unread for newly active site to reflect 'visited'
-            if let active = SiteTabManager.shared.activeTab() {
-                UnreadManager.shared.clear(for: active.site.id)
-            }
+            // Do not auto-clear unread counts when switching active tabs so unread badges remain visible
         }
     }
 
@@ -568,13 +565,25 @@ class BrowserWindowController: NSWindowController {
         let menu = NSMenu(title: "Site")
         menu.addItem(withTitle: "Reload Site", action: #selector(reloadSite(_:)), keyEquivalent: "").representedObject = site
         menu.addItem(withTitle: "Open in Default Browser", action: #selector(openInBrowser(_:)), keyEquivalent: "").representedObject = site
+        // Offer explicit mark-as-read action when there are unread notifications
+        if UnreadManager.shared.count(for: site.id) > 0 {
+            let mark = NSMenuItem(title: "Mark Site as Read", action: #selector(markSiteAsRead(_:)), keyEquivalent: "")
+            mark.representedObject = site
+            menu.addItem(mark)
+        }
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Site Settings…", action: #selector(openSiteSettings(_:)), keyEquivalent: "").representedObject = site
+
         guard let event = NSApp.currentEvent, let win = self.window, let content = win.contentView else {
             // Unable to show context menu safely
             return
         }
         NSMenu.popUpContextMenu(menu, with: event, for: content)
+    }
+
+    @objc private func markSiteAsRead(_ sender: NSMenuItem) {
+        guard let site = sender.representedObject as? Site else { return }
+        UnreadManager.shared.clear(for: site.id)
     }
 
     @objc private func reloadSite(_ sender: NSMenuItem) {
