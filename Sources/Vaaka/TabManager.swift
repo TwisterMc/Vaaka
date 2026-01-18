@@ -85,8 +85,8 @@ final class SiteTabManager: NSObject {
             ContentBlockerManager.shared.addTo(userContentController: userContent)
             config.userContentController = userContent
 
-            // Each WebView gets its own configuration
-            let tab = SiteTab(site: site, configuration: config)
+            // Create a SiteTab that manages its own configuration internally
+            let tab = SiteTab(site: site)
             // Make the WebView appear like Safari to servers that vary content by UA
             tab.webView.customUserAgent = UserAgent.safari
             // Navigation delegate to enforce whitelist (keep strong reference on the tab)
@@ -254,7 +254,7 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
 }
 
 // Handle actions coming from our internal error page (Retry / Open in Browser / Dismiss)
-private final class ErrorMessageHandler: NSObject, WKScriptMessageHandler {
+final class ErrorMessageHandler: NSObject, WKScriptMessageHandler {
     private let siteId: String
     init(siteId: String) { self.siteId = siteId }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

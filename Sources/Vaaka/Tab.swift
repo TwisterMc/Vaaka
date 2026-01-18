@@ -31,17 +31,35 @@ final class SiteTab: NSObject {
     private var faviconRefreshTimer: DispatchSourceTimer?
 
 
-    init(site: Site, configuration: WKWebViewConfiguration = WKWebViewConfiguration()) {
+
+    init(site: Site) {
         self.site = site
-        // Enable Web Inspector in DEBUG builds only
-        #if DEBUG
-        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
-        #endif
+
+        // Create fresh configuration for this tab
+        let configuration = WKWebViewConfiguration()
+        // Use an ephemeral data store per tab to isolate cookies/storage
+        configuration.websiteDataStore = WKWebsiteDataStore.nonPersistent()
+        let webpagePreferences = WKWebpagePreferences()
+        webpagePreferences.allowsContentJavaScript = true
+        configuration.defaultWebpagePreferences = webpagePreferences
+
+
+        // Configure content controller and content-blocking for this tab
+        let userContent = WKUserContentController()
+        userContent.add(ErrorMessageHandler(siteId: site.id), name: "vaakaError")
+        ContentBlockerManager.shared.addTo(userContentController: userContent)
+        configuration.userContentController = userContent
+
         self.webView = SiteTab.makeWebView(configuration: configuration)
         super.init()
 
-        // Add user scripts and message handlers bound to this SiteTab instance
+        // Use this tab's userContentController for scripts and handlers
         let ucc = self.webView.configuration.userContentController
+
+        #if DEBUG
+        // Log configuration identity for debugging
+        Logger.shared.debug("[DEBUG][SiteTab] init site=\(site.name) webView=\(ObjectIdentifier(self.webView)) config=\(ObjectIdentifier(self.webView.configuration)) ucc=\(ObjectIdentifier(self.webView.configuration.userContentController)) dataStore=\(ObjectIdentifier(self.webView.configuration.websiteDataStore))")
+        #endif
 
         // Always inject badge detection (works even without simulation)
         let badgeScript = WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
@@ -148,6 +166,7 @@ final class SiteTab: NSObject {
 
     deinit {
         loadingWatchdogWorkItem?.cancel()
+
         NotificationCenter.default.removeObserver(self)
         // Clean up injected script message handlers if present
         let ucc = webView.configuration.userContentController
@@ -189,9 +208,25 @@ final class SiteTab: NSObject {
                 SiteTabManager.shared.setActiveIndex(idx)
             }
 
-            // Create new webview based on previous configuration
+            // Create new webview with a fresh configuration (avoid reusing old.configuration which can cause state sharing)
             let old = self.webView
-            let new = SiteTab.makeWebView(configuration: old.configuration)
+            let newConfig = WKWebViewConfiguration()
+            // Use an ephemeral data store for recovered webviews to avoid sharing site state
+            newConfig.websiteDataStore = WKWebsiteDataStore.nonPersistent()
+            let webpagePreferences = WKWebpagePreferences()
+            webpagePreferences.allowsContentJavaScript = true
+            newConfig.defaultWebpagePreferences = webpagePreferences
+            let newUserContent = WKUserContentController()
+            newUserContent.add(ErrorMessageHandler(siteId: self.site.id), name: "vaakaError")
+            ContentBlockerManager.shared.addTo(userContentController: newUserContent)
+            newConfig.userContentController = newUserContent
+
+            let new = SiteTab.makeWebView(configuration: newConfig)
+
+            // Log replacement details for debugging
+            #if DEBUG
+            Logger.shared.debug("[DEBUG][SiteTab] contentProcessRecovery site=\(self.site.name) oldWebView=\(ObjectIdentifier(old)) newWebView=\(ObjectIdentifier(new)) newConfig=\(ObjectIdentifier(new.configuration)) newUCC=\(ObjectIdentifier(new.configuration.userContentController))")
+            #endif
 
             // Reinstall user scripts / handlers bound to this SiteTab
             let ucc = new.configuration.userContentController

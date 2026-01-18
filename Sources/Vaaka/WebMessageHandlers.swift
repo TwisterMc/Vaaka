@@ -74,7 +74,7 @@ final class BadgeUpdateHandler: NSObject, WKScriptMessageHandler {
         }
     }
 }
-/// Forward JS console messages to the system logger (helpful when Web Inspector is unreliable)
+/// Forward JS console messages to the system logger (helpful for JS debugging)
 final class ConsoleMessageHandler: NSObject, WKScriptMessageHandler {
     private weak var siteTab: SiteTab?
 
