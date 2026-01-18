@@ -37,19 +37,13 @@ class FaviconFetcher {
             let wwwHost = host.hasPrefix("www.") ? nil : "www.\(host)"
             
             // Append well-known fallback paths, prioritizing larger sizes
-            urls.append(URL(string: "https://\(host)/apple-touch-icon.png")!)
-            if let wHost = wwwHost {
-                urls.append(URL(string: "https://\(wHost)/apple-touch-icon.png")!)
-            }
-            urls.append(URL(string: "https://\(host)/apple-touch-icon-precomposed.png")!)
-            if let wHost = wwwHost {
-                urls.append(URL(string: "https://\(wHost)/apple-touch-icon-precomposed.png")!)
-            }
-            
-            urls.append(URL(string: "https://\(host)/favicon.ico")!)
-            if let wHost = wwwHost {
-                urls.append(URL(string: "https://\(wHost)/favicon.ico")!)
-            }
+            if let u = URL(string: "https://\(host)/apple-touch-icon.png") { urls.append(u) }
+            if let wHost = wwwHost, let u = URL(string: "https://\(wHost)/apple-touch-icon.png") { urls.append(u) }
+            if let u = URL(string: "https://\(host)/apple-touch-icon-precomposed.png") { urls.append(u) }
+            if let wHost = wwwHost, let u = URL(string: "https://\(wHost)/apple-touch-icon-precomposed.png") { urls.append(u) }
+
+            if let u = URL(string: "https://\(host)/favicon.ico") { urls.append(u) }
+            if let wHost = wwwHost, let u = URL(string: "https://\(wHost)/favicon.ico") { urls.append(u) }
             
             self.fetchFromCandidateURLs(urls, completion: completion)
         }

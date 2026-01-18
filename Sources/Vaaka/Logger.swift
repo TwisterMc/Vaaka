@@ -67,7 +67,16 @@ final class Logger {
         }
     }
 
+    static var isDebugEnabled: Bool {
+        #if DEBUG
+        return true
+        #else
+        return UserDefaults.standard.bool(forKey: "Vaaka.EnableDebugLogging")
+        #endif
+    }
+
     func debug(_ message: String) {
+        guard Logger.isDebugEnabled else { return }
         Swift.print(message)
         log(message)
     }

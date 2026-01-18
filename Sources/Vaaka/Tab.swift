@@ -30,9 +30,9 @@ final class SiteTab: NSObject {
     // Timer used to refresh dynamic favicons (e.g., Google Calendar daily favicon)
     private var faviconRefreshTimer: DispatchSourceTimer?
 
-    // Tokens for NotificationCenter closure observers so we can unregister them
-    private var startLoadingObserver: NSObjectProtocol?
-    private var finishLoadingObserver: NSObjectProtocol?
+    // Tokens for NotificationCenter closure observers so we can unregister them easily
+    private var startLoadingObserver: ObserverToken?
+    private var finishLoadingObserver: ObserverToken?
 
 
 
@@ -95,7 +95,7 @@ final class SiteTab: NSObject {
         ucc.add(ctxHandler, name: "contextMenu")
 
             // Observe start events for this site so we can cancel watchdogs
-        self.startLoadingObserver = NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: nil, queue: .main) { [weak self] note in
+        self.startLoadingObserver = ObserverToken(token: NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: nil, queue: .main) { [weak self] note in
             guard let self = self, let id = note.object as? String, id == self.site.id else { return }
             // Cancel pre-start watchdog if navigation actually started
             self.loadingWatchdogWorkItem?.cancel()
@@ -147,10 +147,10 @@ final class SiteTab: NSObject {
             }
             self.navigationStuckWorkItem = wi
             DispatchQueue.main.asyncAfter(deadline: .now() + stuckTimeout, execute: wi)
-        }
+        })
 
         // Observe finish events to clear any stuck-navigation watchdogs
-        self.finishLoadingObserver = NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: nil, queue: .main) { [weak self] note in
+        self.finishLoadingObserver = ObserverToken(token: NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: nil, queue: .main) { [weak self] note in
             guard let self = self, let id = note.object as? String, id == self.site.id else { return }
             // Cancel any in-flight watchdogs and clear navigation state
             self.loadingWatchdogWorkItem?.cancel()
@@ -161,7 +161,7 @@ final class SiteTab: NSObject {
 
             // After navigation completes, start dynamic favicon refresh if appropriate
             self.startFaviconRefreshIfNeeded()
-        }
+        })
 
         // Do not load the start URL immediately — wait until the WebView is attached to the window/content view.
         // This avoids spurious `open` attempts while the WebView is not yet part of the responder/window chain.
@@ -172,8 +172,10 @@ final class SiteTab: NSObject {
         loadingWatchdogWorkItem?.cancel()
 
         // Unregister closure-based observers if present
-        if let o = startLoadingObserver { NotificationCenter.default.removeObserver(o); startLoadingObserver = nil }
-        if let o = finishLoadingObserver { NotificationCenter.default.removeObserver(o); finishLoadingObserver = nil }
+        startLoadingObserver?.invalidate()
+        startLoadingObserver = nil
+        finishLoadingObserver?.invalidate()
+        finishLoadingObserver = nil
 
         NotificationCenter.default.removeObserver(self)
         // Clean up injected script message handlers if present
