@@ -30,6 +30,10 @@ final class SiteTab: NSObject {
     // Timer used to refresh dynamic favicons (e.g., Google Calendar daily favicon)
     private var faviconRefreshTimer: DispatchSourceTimer?
 
+    // Tokens for NotificationCenter closure observers so we can unregister them
+    private var startLoadingObserver: NSObjectProtocol?
+    private var finishLoadingObserver: NSObjectProtocol?
+
 
 
     init(site: Site) {
@@ -91,7 +95,7 @@ final class SiteTab: NSObject {
         ucc.add(ctxHandler, name: "contextMenu")
 
             // Observe start events for this site so we can cancel watchdogs
-        NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: nil, queue: .main) { [weak self] note in
+        self.startLoadingObserver = NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: nil, queue: .main) { [weak self] note in
             guard let self = self, let id = note.object as? String, id == self.site.id else { return }
             // Cancel pre-start watchdog if navigation actually started
             self.loadingWatchdogWorkItem?.cancel()
@@ -146,7 +150,7 @@ final class SiteTab: NSObject {
         }
 
         // Observe finish events to clear any stuck-navigation watchdogs
-        NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: nil, queue: .main) { [weak self] note in
+        self.finishLoadingObserver = NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: nil, queue: .main) { [weak self] note in
             guard let self = self, let id = note.object as? String, id == self.site.id else { return }
             // Cancel any in-flight watchdogs and clear navigation state
             self.loadingWatchdogWorkItem?.cancel()
@@ -167,9 +171,16 @@ final class SiteTab: NSObject {
     deinit {
         loadingWatchdogWorkItem?.cancel()
 
+        // Unregister closure-based observers if present
+        if let o = startLoadingObserver { NotificationCenter.default.removeObserver(o); startLoadingObserver = nil }
+        if let o = finishLoadingObserver { NotificationCenter.default.removeObserver(o); finishLoadingObserver = nil }
+
         NotificationCenter.default.removeObserver(self)
         // Clean up injected script message handlers if present
         let ucc = webView.configuration.userContentController
+        // Remove handlers we added during init
+        ucc.removeScriptMessageHandler(forName: "vaakaError")
+        ucc.removeScriptMessageHandler(forName: "contextMenu")
         if badgeHandler != nil {
             ucc.removeScriptMessageHandler(forName: "badgeUpdate")
         }

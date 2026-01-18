@@ -865,9 +865,7 @@ class BrowserWindowController: NSWindowController {
             // Initial badge state
             self.updateBadge()
             NotificationCenter.default.addObserver(self, selector: #selector(unreadChanged(_:)), name: .UnreadChanged, object: nil)
-            // Update overview favicon when saved
-            NotificationCenter.default.addObserver(self, selector: #selector(faviconSaved(_:)), name: .FaviconSaved, object: nil)
-            // Update favicon immediately when saved
+            // Update overview/favicon when saved
             NotificationCenter.default.addObserver(self, selector: #selector(faviconSaved(_:)), name: .FaviconSaved, object: nil)
 
             // Listen for dynamic favicon updates specifically for this site
