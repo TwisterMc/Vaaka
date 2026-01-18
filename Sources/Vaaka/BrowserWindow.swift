@@ -21,6 +21,8 @@ class BrowserWindowController: NSWindowController {
 
     // Event monitor for keyboard shortcuts
     private var keyMonitor: Any?
+    // Prevent accidental double-toggle of the Tab Overview from duplicate key events
+    private var lastTabOverviewToggle: Date?
 
     convenience init() {
         let rect = NSRect(x: 100, y: 100, width: 1200, height: 800)
@@ -460,11 +462,8 @@ class BrowserWindowController: NSWindowController {
     private func handleKeyEvent(_ evt: NSEvent) -> NSEvent? {
         // Cmd+T for Tab Overview — toggle overview when pressed
         if evt.modifierFlags.contains(.command) && evt.charactersIgnoringModifiers == "t" {
-            if tabOverviewView != nil {
-                hideTabOverview()
-            } else {
-                tabOverviewClicked()
-            }
+            // Route through the same toggle entry point used by the toolbar/menu so all callers share the debounce logic.
+            self.tabOverviewClicked(nil)
             return nil
         }
         
@@ -500,7 +499,16 @@ class BrowserWindowController: NSWindowController {
         SiteTabManager.shared.setActiveIndex(index)
     }
     
+    private let tabOverviewDebounceInterval: TimeInterval = 0.35
+
     @objc func tabOverviewClicked(_ sender: Any? = nil) {
+        // Debounce duplicate calls from different input sources (keyboard/menu/button)
+        let now = Date()
+        if let last = self.lastTabOverviewToggle, now.timeIntervalSince(last) < tabOverviewDebounceInterval {
+            return
+        }
+        self.lastTabOverviewToggle = now
+
         if tabOverviewView != nil {
             hideTabOverview()
         } else {
