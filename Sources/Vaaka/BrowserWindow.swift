@@ -1486,7 +1486,7 @@ class TabOverviewView: NSView {
             case 53: // Escape
                 self.onDismiss()
                 return nil
-            case 36: // Enter
+            case 36, 76: // Return / Enter
                 if let selected = self.selectedIndex {
                     self.onSelect(selected)
                 }
