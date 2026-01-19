@@ -26,9 +26,10 @@ The idea came from the Fluid app from back in the day, where I could whiltelist 
 - **User-Agent Spoofing** - Appears as Safari to avoid differential treatment
 - **Do Not Track Support** - Optional - DNT header for privacy-conscious browsing
 - **Local Data Storage** - All data is stored locally; no telemetry collected
-- **Notifications** - Native macOS notifications for web alerts (I'm trying)
-- **Unread Badge Counts** - Visual indicators for unread messages on supported sites (I'm trying)
+- **Notifications** - Native macOS notifications for web alerts (I'm trying, but it's complicated.)
+- **Unread Badge Counts** - Visual indicators for unread messages on supported sites (I'm trying, and we're getting closer.)
 - **Tab Overview** - Preview all tabs in a grid view for quick navigation
+- **Find Bar** - Search within the current page with a built-in find bar
 
 ## Installation
 
