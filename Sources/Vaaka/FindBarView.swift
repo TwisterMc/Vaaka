@@ -26,33 +26,63 @@ class FindBarView: NSView {
         wantsLayer = true
         layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
 
+        // Accessibility: make the bar a group and expose children in a logical order
+        self.setAccessibilityElement(true)
+        self.setAccessibilityRole(.group)
+        self.setAccessibilityLabel("Find in page")
+
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.placeholderString = "Find in page"
         searchField.target = self
         searchField.action = #selector(searchFieldChanged)
         searchField.delegate = self
+        searchField.setAccessibilityLabel("Find field")
+        searchField.setAccessibilityIdentifier("FindBar.SearchField")
 
         matchLabel.translatesAutoresizingMaskIntoConstraints = false
         matchLabel.font = .systemFont(ofSize: 11)
         matchLabel.textColor = .secondaryLabelColor
+        matchLabel.setAccessibilityLabel("Match count")
+        matchLabel.setAccessibilityIdentifier("FindBar.MatchLabel")
 
         previousButton.translatesAutoresizingMaskIntoConstraints = false
         previousButton.target = self
         previousButton.action = #selector(previousClicked)
+        previousButton.setAccessibilityLabel("Previous result")
+        previousButton.setAccessibilityIdentifier("FindBar.PreviousButton")
 
         nextButton.translatesAutoresizingMaskIntoConstraints = false
         nextButton.target = self
         nextButton.action = #selector(nextClicked)
+        nextButton.setAccessibilityLabel("Next result")
+        nextButton.setAccessibilityIdentifier("FindBar.NextButton")
 
         doneButton.translatesAutoresizingMaskIntoConstraints = false
         doneButton.target = self
         doneButton.action = #selector(closeClicked)
+        doneButton.setAccessibilityLabel("Close find bar")
+        doneButton.setAccessibilityIdentifier("FindBar.CloseButton")
 
         addSubview(searchField)
         addSubview(matchLabel)
         addSubview(previousButton)
         addSubview(nextButton)
         addSubview(doneButton)
+
+        // Ensure VoiceOver traverses elements in a logical order
+        self.setAccessibilityChildren([searchField, matchLabel, previousButton, nextButton, doneButton])
+
+        // Keyboard: allow Tab/Shift-Tab navigation between controls
+        // Order: searchField -> previousButton -> nextButton -> doneButton -> back to searchField
+        searchField.nextKeyView = previousButton
+        previousButton.nextKeyView = nextButton
+        nextButton.nextKeyView = doneButton
+        doneButton.nextKeyView = searchField
+
+        // Make focus rings visible when controls receive keyboard focus
+        previousButton.focusRingType = .default
+        nextButton.focusRingType = .default
+        doneButton.focusRingType = .default
 
         NSLayoutConstraint.activate([
             searchField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
