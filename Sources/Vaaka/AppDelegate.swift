@@ -149,6 +149,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let findItem = NSMenuItem(title: "Find in Page…", action: #selector(BrowserWindowController.performFind(_:)), keyEquivalent: "f")
         findItem.keyEquivalentModifierMask = [.command]
         editMenu.addItem(findItem)
+        // Find next (Cmd-G)
+        let findNextItem = NSMenuItem(title: "Find Next", action: #selector(BrowserWindowController.performFindNextAction(_:)), keyEquivalent: "g")
+        findNextItem.keyEquivalentModifierMask = [.command]
+        editMenu.addItem(findNextItem)
+        // Find previous (Shift-Cmd-G)
+        let findPrevItem = NSMenuItem(title: "Find Previous", action: #selector(BrowserWindowController.performFindPreviousAction(_:)), keyEquivalent: "g")
+        findPrevItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(findPrevItem)
         editMenuItem.submenu = editMenu
 
         // Window menu

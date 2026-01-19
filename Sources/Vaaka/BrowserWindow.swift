@@ -198,6 +198,14 @@ class BrowserWindowController: NSWindowController {
         showFindBar()
     }
 
+    @objc func performFindNextAction(_ sender: Any?) {
+        performFindNext()
+    }
+
+    @objc func performFindPreviousAction(_ sender: Any?) {
+        performFindPrevious()
+    }
+
     private func showFindBar() {
         guard let contentView = window?.contentView else { return }
         if findBar == nil {
