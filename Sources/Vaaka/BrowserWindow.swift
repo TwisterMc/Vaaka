@@ -16,6 +16,10 @@ class BrowserWindowController: NSWindowController {
     // Track created webviews attached to the content container
     private var webViewsAttached: Set<String> = [] // site.id values
 
+    // Remember last active index so we only treat real tab changes as tab switches
+    // (avoids closing UI like the find bar when unrelated ActiveTabChanged notifications occur)
+    private var lastKnownActiveIndex: Int? = nil
+
     // Downloads UI
     private let downloadsBar = DownloadsBarView()
     private var downloadsBarHeightConstraint: NSLayoutConstraint?
@@ -373,11 +377,24 @@ class BrowserWindowController: NSWindowController {
         // Update visual active states and visible webview
         DispatchQueue.main.async {
             let idx = SiteTabManager.shared.activeIndex
+
+            // Detect whether the active index actually changed. Some callers may post
+            // ActiveTabChanged notifications even when the index is unchanged (e.g., window focus
+            // or other UI updates). Only treat real index changes as tab switches.
+            let didChange = (self.lastKnownActiveIndex == nil) || (self.lastKnownActiveIndex != idx)
+
             self.updateRailSelection(activeIndex: idx)
             self.setActiveWebViewVisibility(index: idx)
             self.updateWindowTitleForActiveTab()
-            // Close the find bar when switching tabs so it doesn't persist across pages
-            self.hideFindBar()
+
+            if didChange {
+                // Close the find bar when switching tabs so it doesn't persist across pages
+                self.hideFindBar()
+            }
+
+            // Remember for future comparisons
+            self.lastKnownActiveIndex = idx
+
             // Do not auto-clear unread counts when switching active tabs so unread badges remain visible
         }
     }
