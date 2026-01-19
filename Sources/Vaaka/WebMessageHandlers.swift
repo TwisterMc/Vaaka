@@ -78,6 +78,10 @@ final class BadgeUpdateHandler: NSObject, WKScriptMessageHandler {
 final class ConsoleMessageHandler: NSObject, WKScriptMessageHandler {
     private weak var siteTab: SiteTab?
 
+    // Simple in-memory throttling to avoid log floods: map of message key -> last logged time
+    private static var recentMessages: [String: Date] = [:]
+    private static let throttleInterval: TimeInterval = 60 // seconds
+
     init(siteTab: SiteTab) {
         self.siteTab = siteTab
     }
@@ -86,11 +90,47 @@ final class ConsoleMessageHandler: NSObject, WKScriptMessageHandler {
         guard let tab = siteTab else { return }
         guard let body = message.body as? [String: Any], let level = body["level"] as? String, let msg = body["message"] as? String else { return }
 
+        // Quick filters to drop unhelpful noise
+        let trimmed = msg.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return }
+        if trimmed.contains("[Vaaka] Console forwarder installed") { return }
+        // Many pages report bare Event objects which stringify to "[object Event]" — drop these if they provide no stack
+        if let _ = trimmed.range(of: "^\\[object .*\\]$", options: .regularExpression), (body["stack"] as? String ?? "").isEmpty {
+            return
+        }
+
+        // Throttle repeated identical messages to once per `throttleInterval`
         let siteName = tab.site.name
-        let line = "[JS] [\(siteName)] [\(level)] \(msg)"
+        var sanitized = trimmed
+        if sanitized.count > 500 { sanitized = String(sanitized.prefix(500)) + "...[truncated]" }
+        let key = "\(siteName)|\(level)|\(sanitized)"
+        let now = Date()
+        if let last = ConsoleMessageHandler.recentMessages[key], now.timeIntervalSince(last) < ConsoleMessageHandler.throttleInterval {
+            return
+        }
+        ConsoleMessageHandler.recentMessages[key] = now
+
+        // Only log warnings/errors by default. For "log" level we keep only notable messages.
+        let shouldLog: Bool
+        switch level.lowercased() {
+        case "error", "warn", "warning":
+            shouldLog = true
+        case "log", "info", "debug":
+            shouldLog = sanitized.contains("Vaaka") || sanitized.contains("UnhandledRejection") || sanitized.contains("Exception")
+        default:
+            shouldLog = false
+        }
+        if !shouldLog { return }
+
+        // Include stack if present
+        let stack = (body["stack"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        var line = "[JS] [\(siteName)] [\(level)] \(sanitized)"
+        if !stack.isEmpty {
+            line += "\nStack:\n\(stack)"
+        }
         Logger.shared.debug(line)
     }
-}
+} 
 
 // Handle contextmenu events reported from the page (e.g., right-click on an <img>) so we can present
 // a native Save dialog and handle the download natively (works around WebKit default menu limitations).

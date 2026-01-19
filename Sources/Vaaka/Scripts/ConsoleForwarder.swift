@@ -42,8 +42,6 @@ struct ConsoleForwarder {
                 }
             } catch(e) { }
         }, true);
-
-        console.log('[Vaaka] Console forwarder installed');
     })();
     """
 }

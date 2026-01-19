@@ -70,7 +70,7 @@ final class SiteTab: NSObject {
         let badgeScript = WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
         ucc.addUserScript(badgeScript)
 
-        // Inject console forwarder to capture JS console/error messages (helps when the Web Inspector is broken)
+        // Inject console forwarder to capture JS console/error messages for debugging
         let consoleScript = WKUserScript(source: ConsoleForwarder.script, injectionTime: .atDocumentStart, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
         ucc.addUserScript(consoleScript)
         let cHandler = ConsoleMessageHandler(siteTab: self)
