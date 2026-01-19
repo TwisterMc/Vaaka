@@ -228,9 +228,11 @@ class BrowserWindowController: NSWindowController {
             h.isActive = true
             findBarHeightConstraint = h
             NSLayoutConstraint.activate([
+                // Pin the bar to the top of the window but constrain its horizontal edges
+                // to the content area so it doesn't overlap the left rail/sidebar.
                 bar.topAnchor.constraint(equalTo: contentView.topAnchor),
-                bar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-                bar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
+                bar.leadingAnchor.constraint(equalTo: self.contentContainer.leadingAnchor),
+                bar.trailingAnchor.constraint(equalTo: self.contentContainer.trailingAnchor)
             ])
             findBar = bar
         }
