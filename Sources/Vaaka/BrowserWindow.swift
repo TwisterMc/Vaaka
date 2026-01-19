@@ -715,6 +715,9 @@ class BrowserWindowController: NSWindowController {
         // Don't show if already visible
         if tabOverviewView != nil { return }
         
+        // Close the find bar if it's open so it doesn't persist over the overview
+        self.hideFindBar()
+        
         let overviewView = TabOverviewView(tabs: SiteTabManager.shared.tabs, activeIndex: SiteTabManager.shared.activeIndex) { [weak self] selectedIndex in
             self?.hideTabOverview()
             SiteTabManager.shared.setActiveIndex(selectedIndex)
