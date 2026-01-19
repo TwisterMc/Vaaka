@@ -242,11 +242,10 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         // Locate the corresponding SiteTab and attach a handler to manage the download lifecycle and destination.
         if let tab = SiteTabManager.shared.tabs.first(where: { $0.webView == webView }) {
             let handler = SiteTab.SiteDownloadHandler(siteTab: tab, download: download)
-            // Create a provisional DownloadsManager entry so UI can show activity immediately
-            let id = UUID().uuidString
-            handler.downloadId = id
-            DownloadsManager.shared.addExternalDownload(id: id, siteId: tab.site.id, sourceURL: nil, suggestedFilename: "download", destination: nil, taskIdentifier: nil)
-            DownloadsManager.shared.registerCancellable(id: id, handler)
+            // Do NOT pre-register a download entry — wait until the handler's
+            // decideDestination step confirms the destination (user Save) before
+            // adding the DownloadsManager entry. This prevents placeholder "Download"
+            // rows with 0% progress when the user cancels the Save panel.
             tab.registerDownloadHandler(handler, for: download)
             download.delegate = handler
         }

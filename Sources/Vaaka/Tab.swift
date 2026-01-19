@@ -346,6 +346,7 @@ final class SiteTab: NSObject {
 
 
         var downloadId: String?
+        private var finalDestination: URL?
 
         @MainActor
         func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {
@@ -368,13 +369,12 @@ final class SiteTab: NSObject {
                 proposed = candidate
             }
 
-            // Register an item in DownloadsManager so UI can show it immediately
+                // Generate a local id for this potential download, but do not register until user confirms
             let id = UUID().uuidString
             self.downloadId = id
-            DownloadsManager.shared.addExternalDownload(id: id, siteId: self.siteTab?.site.id ?? "", sourceURL: response.url, suggestedFilename: suggestedFilename, destination: proposed, taskIdentifier: nil)
-            DownloadsManager.shared.registerCancellable(id: id, self)
 
-            // If there is a key window, present a save panel and await user's destination choice
+            // If there is a key window, present a save panel and await user's destination choice.
+            // Only register the download with DownloadsManager after the user confirms the destination.
             if let win = NSApp.keyWindow {
                 return await withCheckedContinuation { (cont: CheckedContinuation<URL?, Never>) in
                     let panel = NSSavePanel()
@@ -382,34 +382,81 @@ final class SiteTab: NSObject {
                     panel.canCreateDirectories = true
                     panel.beginSheetModal(for: win) { resp in
                         if resp == .OK, let dest = panel.url {
-                            DownloadsManager.shared.setDestination(id: id, destination: dest)
-                            cont.resume(returning: dest)
+                            // User confirmed destination -> register and continue
+                            DownloadsManager.shared.addExternalDownload(id: id, siteId: self.siteTab?.site.id ?? "", sourceURL: response.url, suggestedFilename: suggestedFilename, destination: dest, taskIdentifier: nil)
+                            DownloadsManager.shared.registerCancellable(id: id, self)
+                            let fm = FileManager.default
+                            if fm.fileExists(atPath: dest.path) {
+                                // Destination exists; stage to a temporary file and move into place on completion
+                                let temp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(dest.pathExtension)
+                                DownloadsManager.shared.setDestination(id: id, destination: temp)
+                                self.finalDestination = dest
+                                cont.resume(returning: temp)
+                            } else {
+                                DownloadsManager.shared.setDestination(id: id, destination: dest)
+                                cont.resume(returning: dest)
+                            }
                         } else {
+                            // User cancelled the save panel -> cancel the WKDownload and do not register
+                            Logger.shared.debug("[DEBUG] user cancelled save panel for download; cancelling WKDownload")
+                            Task { @MainActor in
+                                // Use async cancel API for WKDownload
+                                if let d = self.download {
+                                    _ = await d.cancel()
+                                }
+                            }
                             cont.resume(returning: nil)
                         }
                     }
                 }
             }
 
+            // No key window available (headless) -> register and proceed with proposed destination
+            DownloadsManager.shared.addExternalDownload(id: id, siteId: self.siteTab?.site.id ?? "", sourceURL: response.url, suggestedFilename: suggestedFilename, destination: proposed, taskIdentifier: nil)
+            DownloadsManager.shared.registerCancellable(id: id, self)
+            if let p = proposed {
+                let fm = FileManager.default
+                if fm.fileExists(atPath: p.path) {
+                    let temp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(p.pathExtension)
+                    DownloadsManager.shared.setDestination(id: id, destination: temp)
+                    self.finalDestination = p
+                    return temp
+                }
+            }
             return proposed
         }
         func downloadDidFinish(_ download: WKDownload) {
             DispatchQueue.main.async {
                 Logger.shared.debug("[DEBUG] Download finished for site: \(self.siteTab?.site.name ?? "<unknown>")")
-                // If we know the destination from the decideDestination step, reveal it.
+                // If we know the destination from the decideDestination step, reveal it and move staged file if necessary.
                 if let id = self.downloadId, let item = DownloadsManager.shared.allItems().first(where: { $0.id == id }), let dest = item.destinationURL {
-                    NSWorkspace.shared.activateFileViewerSelecting([dest])
+                    let fm = FileManager.default
+                    if let final = self.finalDestination {
+                        do {
+                            // Remove existing final if present and move staged file into place
+                            if fm.fileExists(atPath: final.path) { try fm.removeItem(at: final) }
+                            try fm.moveItem(at: dest, to: final)
+                            DownloadsManager.shared.complete(id: id, destination: final)
+                            NSWorkspace.shared.activateFileViewerSelecting([final])
+                        } catch {
+                            DownloadsManager.shared.fail(id: id, error: error)
+                        }
+                    } else {
+                        // No staging used — download wrote directly to the final destination
+                        DownloadsManager.shared.complete(id: id, destination: dest)
+                        NSWorkspace.shared.activateFileViewerSelecting([dest])
+                    }
                 } else if let fm = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
                     NSWorkspace.shared.activateFileViewerSelecting([fm])
                 }
                 if let d = self.download {
                     self.siteTab?.unregisterDownloadHandler(for: d)
                 }
-                // Mark complete in manager if we previously registered an id
+                // Clean up registration
                 if let id = self.downloadId {
-                    DownloadsManager.shared.complete(id: id, destination: nil)
                     DownloadsManager.shared.unregisterCancellable(id: id)
                 }
+                self.finalDestination = nil
             }
         }
 
@@ -430,9 +477,14 @@ final class SiteTab: NSObject {
                     self.siteTab?.unregisterDownloadHandler(for: d)
                 }
                 if let id = self.downloadId {
+                    // Remove any staged temp file
+                    if let item = DownloadsManager.shared.allItems().first(where: { $0.id == id }), let staged = item.destinationURL {
+                        try? FileManager.default.removeItem(at: staged)
+                    }
                     DownloadsManager.shared.fail(id: id, error: error)
                     DownloadsManager.shared.unregisterCancellable(id: id)
                 }
+                self.finalDestination = nil
             }
         }
 
@@ -445,7 +497,11 @@ final class SiteTab: NSObject {
         }
 
         func cancelDownload() {
-            download?.cancel()
+            Task { @MainActor in
+                if let d = self.download {
+                    _ = await d.cancel()
+                }
+            }
         }
     }
 

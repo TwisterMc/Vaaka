@@ -394,17 +394,48 @@ class BrowserWindowController: NSWindowController {
             self.window?.contentView?.layoutSubtreeIfNeeded()
         }
 
-        // Auto-hide when no in-progress items after a delay
+        // Auto-hide when no in-progress items after a short delay
         hideDownloadsWorkItem?.cancel()
-        if !visible { return }
-        // If there are no in-progress items, schedule a hide after 5s
-        if items.first(where: { $0.status == .inProgress }) == nil {
-            let wi = DispatchWorkItem { [weak self] in
-                self?.updateDownloadsBar(animated: true)
-            }
-            hideDownloadsWorkItem = wi
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: wi)
+
+        // If we have in-progress items, keep the bar visible and do nothing
+        if items.contains(where: { $0.status == .inProgress }) {
+            return
         }
+
+        // If no items at all, hide immediately
+        if items.isEmpty {
+            downloadsBar.apply(items: [])
+            let target: CGFloat = 0
+            downloadsBarHeightConstraint?.constant = target
+            if animated {
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0.2
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    self.window?.contentView?.layoutSubtreeIfNeeded()
+                }, completionHandler: nil)
+            } else {
+                self.window?.contentView?.layoutSubtreeIfNeeded()
+            }
+            return
+        }
+
+        // We have only completed/failed/cancelled items — show them briefly, then remove UI immediately
+        let wi = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                // Clear the visible UI and collapse the bar so it doesn't linger
+                self.downloadsBar.apply(items: [])
+                self.downloadsBarHeightConstraint?.constant = 0
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0.25
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    self.window?.contentView?.layoutSubtreeIfNeeded()
+                }, completionHandler: nil)
+            }
+        }
+        hideDownloadsWorkItem = wi
+        // Shorter delay so UI hides promptly after completion/cancel
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: wi)
     }
 
     @objc private func siteDidFinishLoading(_ note: Notification) {
