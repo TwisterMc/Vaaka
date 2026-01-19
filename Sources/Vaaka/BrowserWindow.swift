@@ -374,6 +374,8 @@ class BrowserWindowController: NSWindowController {
             self.updateRailSelection(activeIndex: idx)
             self.setActiveWebViewVisibility(index: idx)
             self.updateWindowTitleForActiveTab()
+            // Close the find bar when switching tabs so it doesn't persist across pages
+            self.hideFindBar()
             // Do not auto-clear unread counts when switching active tabs so unread badges remain visible
         }
     }
