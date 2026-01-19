@@ -169,6 +169,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let tabOverviewItem = NSMenuItem(title: "Tab Overview", action: #selector(BrowserWindowController.tabOverviewClicked(_:)), keyEquivalent: "t")
         tabOverviewItem.keyEquivalentModifierMask = [.command]
         windowMenu.addItem(tabOverviewItem)
+
+        // Add Command+1..9 menu items to provide standard, non-beeping tab shortcuts
+        windowMenu.addItem(NSMenuItem.separator())
+        for i in 1...9 {
+            let item = NSMenuItem(title: "Select Tab \(i)", action: #selector(BrowserWindowController.selectTabMenuItem(_:)), keyEquivalent: "\(i)")
+            item.keyEquivalentModifierMask = [.command]
+            item.tag = i - 1
+            windowMenu.addItem(item)
+        }
+
         windowMenuItem.submenu = windowMenu
 
         // Help menu

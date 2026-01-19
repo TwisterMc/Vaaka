@@ -674,14 +674,12 @@ class BrowserWindowController: NSWindowController {
             return nil // consume
         }
 
-        // Cmd+1..Cmd+9
-        if evt.modifierFlags.contains(.command), let chars = evt.charactersIgnoringModifiers, let first = chars.first, let digit = Int(String(first)), (1...9).contains(digit) {
-            let idx = digit - 1
-            if idx < SiteTabManager.shared.tabs.count {
-                SiteTabManager.shared.setActiveIndex(idx)
-                return nil
-            }
-        }
+        // Cmd+1..Cmd+9 handled via menu items to avoid system beep; let the menu system invoke the action
+        // (Menu action implemented in BrowserWindowController.selectTabMenuItem(_:))
+        // No-op here so the event is delivered normally and the menu action can be invoked.
+        // (do not consume the event here)
+
+        // fallthrough (don't consume) 
         return evt
     }
 
@@ -756,10 +754,12 @@ class BrowserWindowController: NSWindowController {
         }
     }
 
-    fileprivate func openPreferences() {
-        let prefs = PreferencesWindowController()
-        prefs.showWindow(self)
-        NSApp.activate(ignoringOtherApps: true)
+    // Menu-driven tab selection avoids the system beep that occurs when Command+digit is handled only via a key monitor
+    @objc func selectTabMenuItem(_ sender: NSMenuItem) {
+        let idx = sender.tag
+        if idx < SiteTabManager.shared.tabs.count {
+            SiteTabManager.shared.setActiveIndex(idx)
+        }
     }
 
     // MARK: - Context menu helpers
@@ -802,6 +802,11 @@ class BrowserWindowController: NSWindowController {
 
     @objc private func openSiteSettings(_ sender: NSMenuItem) {
         openPreferences()
+    }
+
+    // Forward to the app delegate's preferences window so other controllers can open it
+    fileprivate func openPreferences() {
+        (NSApp.delegate as? AppDelegate)?.openPreferences(nil)
     }
 
     // Image context menu support
