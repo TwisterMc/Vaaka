@@ -8,6 +8,7 @@ class BrowserWindowController: NSWindowController {
     private let railStackView: NSStackView = NSStackView()
 
     private let contentContainer: NSView = NSView()
+    private var contentTopConstraint: NSLayoutConstraint?
 
     // Constants
     private let railWidth: CGFloat = 52.0 // within 44–56pt range
@@ -135,6 +136,7 @@ class BrowserWindowController: NSWindowController {
         content.addSubview(downloadsBar)
         railContainer.addSubview(railScrollView)
 
+        contentTopConstraint = contentContainer.topAnchor.constraint(equalTo: content.topAnchor)
         NSLayoutConstraint.activate([
             // Left rail fixed width
             railContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -150,7 +152,7 @@ class BrowserWindowController: NSWindowController {
             // Content fills remaining space
             contentContainer.leadingAnchor.constraint(equalTo: railContainer.trailingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            contentContainer.topAnchor.constraint(equalTo: content.topAnchor),
+            contentTopConstraint!,
             contentContainer.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
             // Downloads bar pinned to bottom and initially hidden (height 0)
@@ -183,6 +185,152 @@ class BrowserWindowController: NSWindowController {
 
         // Apply initial downloads state
         updateDownloadsBar(animated: false)
+    }
+
+    // MARK: - Find in Page
+    private var findBar: FindBarView?
+    private var findBarHeightConstraint: NSLayoutConstraint?
+    private var currentSearchText: String = ""
+    private var currentFindIndex: Int = 0
+    private var totalFindMatches: Int = 0
+
+    @objc func performFind(_ sender: Any?) {
+        showFindBar()
+    }
+
+    private func showFindBar() {
+        guard let contentView = window?.contentView else { return }
+        if findBar == nil {
+            let bar = FindBarView()
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            bar.onSearch = { [weak self] text in
+                self?.performWebViewFind(text: text)
+            }
+            bar.onNext = { [weak self] in
+                self?.performFindNext()
+            }
+            bar.onPrevious = { [weak self] in
+                self?.performFindPrevious()
+            }
+            bar.onClose = { [weak self] in
+                self?.hideFindBar()
+            }
+            contentView.addSubview(bar)
+            let h = bar.heightAnchor.constraint(equalToConstant: 0)
+            h.isActive = true
+            findBarHeightConstraint = h
+            NSLayoutConstraint.activate([
+                bar.topAnchor.constraint(equalTo: contentView.topAnchor),
+                bar.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+                bar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor)
+            ])
+            findBar = bar
+        }
+        findBar?.isHidden = false
+        findBarHeightConstraint?.constant = 44
+        contentTopConstraint?.constant = 44
+        window?.contentView?.layoutSubtreeIfNeeded()
+        if let field = findBar?.searchField { window?.makeFirstResponder(field) }
+    }
+
+    private func hideFindBar() {
+        // Clear selection in active web view
+        clearWebViewSelection()
+        // Hide bar and collapse layout
+        findBarHeightConstraint?.constant = 0
+        contentTopConstraint?.constant = 0
+        findBar?.isHidden = true
+        window?.contentView?.layoutSubtreeIfNeeded()
+        currentSearchText = ""
+        currentFindIndex = 0
+        totalFindMatches = 0
+        findBar?.updateMatchCount(current: 0, total: 0)
+    }
+
+    private func performWebViewFind(text: String) {
+        currentSearchText = text
+        currentFindIndex = 0
+        totalFindMatches = 0
+        guard let wv = SiteTabManager.shared.activeTab()?.webView else { return }
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            clearWebViewSelection()
+            findBar?.updateMatchCount(current: 0, total: 0)
+            return
+        }
+        let escaped = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            let js = #"""
+            (function(){
+                var q = '\#(escaped)';
+            var body = document.body && document.body.innerText ? document.body.innerText : '';
+            var esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            var re = new RegExp(esc, 'gi');
+            var count = 0; while(re.exec(body)) { count++; }
+            // reset scroll/selection near top so first find goes from start
+            try { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch(e){}
+            try { var sel = window.getSelection(); if (sel) { sel.removeAllRanges(); } } catch(e){}
+            var found = false;
+            try { found = window.find(q, false, false, true, false, false, false); } catch(e){}
+            return {found: found, total: count};
+        })();
+        """#
+        wv.evaluateJavaScript(js) { [weak self] result, error in
+            guard let self = self else { return }
+            if error != nil {
+                self.findBar?.updateMatchCount(current: 0, total: 0)
+                return
+            }
+            if let dict = result as? [String: Any], let total = dict["total"] as? Int, let found = dict["found"] as? Bool {
+                self.totalFindMatches = total
+                self.currentFindIndex = found && total > 0 ? 1 : 0
+                self.findBar?.updateMatchCount(current: self.currentFindIndex, total: total)
+            } else {
+                self.findBar?.updateMatchCount(current: 0, total: 0)
+            }
+        }
+    }
+
+    private func performFindNext() {
+        guard !currentSearchText.isEmpty, let wv = SiteTabManager.shared.activeTab()?.webView else { return }
+        let escaped = currentSearchText
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            let js = #"(function(){ try { return window.find('\#(escaped)', false, false, true, false, false, false); } catch(e){ return false; } })();"#
+        wv.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self = self else { return }
+            let found = (result as? Bool) ?? false
+            if self.totalFindMatches > 0 {
+                self.currentFindIndex = found ? ((self.currentFindIndex % self.totalFindMatches) + 1) : 0
+            } else {
+                self.currentFindIndex = 0
+            }
+            self.findBar?.updateMatchCount(current: self.currentFindIndex, total: self.totalFindMatches)
+        }
+    }
+
+    private func performFindPrevious() {
+        guard !currentSearchText.isEmpty, let wv = SiteTabManager.shared.activeTab()?.webView else { return }
+        let escaped = currentSearchText
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            let js = #"(function(){ try { return window.find('\#(escaped)', false, true, true, false, false, false); } catch(e){ return false; } })();"#
+        wv.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self = self else { return }
+            let found = (result as? Bool) ?? false
+            if self.totalFindMatches > 0 {
+                self.currentFindIndex = found ? ((self.currentFindIndex - 2 + self.totalFindMatches) % self.totalFindMatches + 1) : 0
+            } else {
+                self.currentFindIndex = 0
+            }
+            self.findBar?.updateMatchCount(current: self.currentFindIndex, total: self.totalFindMatches)
+        }
+    }
+
+    private func clearWebViewSelection() {
+        guard let wv = SiteTabManager.shared.activeTab()?.webView else { return }
+        let js = "(function(){ try { var sel = window.getSelection(); if(sel){ sel.removeAllRanges(); } } catch(e){} })();"
+        wv.evaluateJavaScript(js, completionHandler: nil)
     }
 
     // MARK: - UI updates

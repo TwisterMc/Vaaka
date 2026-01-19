@@ -145,6 +145,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         spellingSub.addItem(NSMenuItem(title: "Check Spelling While Typing", action: NSSelectorFromString("toggleContinuousSpellChecking:"), keyEquivalent: ""))
         spellingItem.submenu = spellingSub
         editMenu.addItem(spellingItem)
+        editMenu.addItem(NSMenuItem.separator())
+        let findItem = NSMenuItem(title: "Find in Page…", action: #selector(BrowserWindowController.performFind(_:)), keyEquivalent: "f")
+        findItem.keyEquivalentModifierMask = [.command]
+        editMenu.addItem(findItem)
         editMenuItem.submenu = editMenu
 
         // Window menu
