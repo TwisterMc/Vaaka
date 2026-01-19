@@ -23,8 +23,20 @@ class FindBarView: NSView {
 
     private func setup() {
         translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+
+        // Use a visual effect background so the bar adapts to light/dark appearances
+        let bgView = NSVisualEffectView()
+        bgView.translatesAutoresizingMaskIntoConstraints = false
+        bgView.material = .sidebar
+        bgView.blendingMode = .withinWindow
+        bgView.state = .active
+        addSubview(bgView, positioned: .below, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            bgView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bgView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bgView.topAnchor.constraint(equalTo: topAnchor),
+            bgView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
 
         // Accessibility: make the bar a group and expose children in a logical order
         self.setAccessibilityElement(true)
@@ -32,12 +44,19 @@ class FindBarView: NSView {
         self.setAccessibilityLabel("Find in page")
 
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchField.placeholderString = "Find in page"
         searchField.target = self
         searchField.action = #selector(searchFieldChanged)
         searchField.delegate = self
         searchField.setAccessibilityLabel("Find field")
         searchField.setAccessibilityIdentifier("FindBar.SearchField")
+
+        // Make the search field use a compact bezel and draw its background so it looks native in both modes
+        searchField.bezelStyle = .roundedBezel
+        searchField.controlSize = .small
+        searchField.drawsBackground = true
+        searchField.backgroundColor = NSColor.controlBackgroundColor
+        let placeholderAttrs: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.placeholderTextColor]
+        searchField.placeholderAttributedString = NSAttributedString(string: "Find in page", attributes: placeholderAttrs)
 
         matchLabel.translatesAutoresizingMaskIntoConstraints = false
         matchLabel.font = .systemFont(ofSize: 11)
@@ -102,6 +121,10 @@ class FindBarView: NSView {
             doneButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             doneButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12)
         ])
+
+        // Observe appearance changes and apply initial appearance
+        NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
+        updateAppearance()
     }
 
     @objc private func searchFieldChanged() {
@@ -122,6 +145,27 @@ class FindBarView: NSView {
         } else {
             matchLabel.stringValue = searchField.stringValue.isEmpty ? "" : "No matches"
         }
+    }
+
+    @objc private func appearanceChanged() { updateAppearance() }
+
+    private func updateAppearance() {
+        // Use the current drawing appearance so semantic colors resolve correctly
+        self.effectiveAppearance.performAsCurrentDrawingAppearance {
+            self.matchLabel.textColor = .secondaryLabelColor
+            self.searchField.textColor = .textColor
+            self.searchField.backgroundColor = NSColor.controlBackgroundColor
+            // Ensure button titles tint appropriately in dark mode
+            if #available(macOS 10.14, *) {
+                self.previousButton.contentTintColor = .labelColor
+                self.nextButton.contentTintColor = .labelColor
+                self.doneButton.contentTintColor = .labelColor
+            }
+        }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 }
 
