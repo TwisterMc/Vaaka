@@ -169,6 +169,22 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
             }
 
             // If the link target actually belongs to the same site (including registrable root), allow it in-app
+            // Special-case Gmail's data-saferedirecturl: Gmail wraps external links with a same-site redirect URL
+            // that contains the real destination in the "data-saferedirecturl" query parameter. In this case
+            // prefer to open the decoded destination externally instead of navigating inside the Gmail tab.
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let items = components.queryItems,
+               let safeValue = items.first(where: { $0.name == "data-saferedirecturl" })?.value,
+               !safeValue.isEmpty {
+                // The parameter is percent-encoded; attempt to decode it (try twice to be robust)
+                var decoded = safeValue.removingPercentEncoding ?? safeValue
+                if let twice = decoded.removingPercentEncoding, twice != decoded { decoded = twice }
+                if let targetURL = URL(string: decoded), let scheme = targetURL.scheme?.lowercased(), (scheme == "https" || scheme == "http") {
+                    NSWorkspace.shared.open(targetURL)
+                    return decisionHandler(.cancel)
+                }
+            }
+
             if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
                 return decisionHandler(.allow)
             }
