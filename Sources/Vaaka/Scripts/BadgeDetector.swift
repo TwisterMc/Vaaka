@@ -71,4 +71,28 @@ struct BadgeDetector {
         console.log('[Vaaka] Badge detector active');
     })();
     """
+
+    // Swift-side helper for unit testing title parsing logic
+    static func parseTitleCount(_ title: String) -> Int {
+        let patterns = [
+            "\\((\\d{1,5})\\)",
+            "\\[(\\d{1,5})\\]",
+            "(?:^|\\W)(\\d{1,4})\\s*(?:unread|new|messages?)\\b",
+            "(?:^|\\W)(\\d{1,4})(?=\\s*[\\|\\-—:])",
+            "[\\u2022\\u00B7•·]\\s*(\\d{1,4})",
+            "(?:^|\\W)(\\d{1,4})\\b"
+        ]
+        for p in patterns {
+            if let regex = try? NSRegularExpression(pattern: p, options: [.caseInsensitive]) {
+                let ns = title as NSString
+                let range = NSRange(location: 0, length: ns.length)
+                if let m = regex.firstMatch(in: title, options: [], range: range), m.numberOfRanges >= 2 {
+                    let r = m.range(at: 1)
+                    let s = ns.substring(with: r)
+                    if let v = Int(s), v >= 0 && v < 10000 { return v }
+                }
+            }
+        }
+        return 0
+    }
 }
