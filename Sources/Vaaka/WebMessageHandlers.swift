@@ -78,9 +78,15 @@ final class BadgeUpdateHandler: NSObject, WKScriptMessageHandler {
 final class ConsoleMessageHandler: NSObject, WKScriptMessageHandler {
     private weak var siteTab: SiteTab?
 
-    // Simple in-memory throttling to avoid log floods: map of message key -> last logged time
-    private static var recentMessages: [String: Date] = [:]
+    // Throttle cache to avoid log floods and bound memory usage:
+    // Use NSCache so entries can be evicted under memory pressure and set a reasonable countLimit.
+    private static let recentMessages: NSCache<NSString, NSDate> = {
+        let c = NSCache<NSString, NSDate>()
+        c.countLimit = 2000 // cap entries to avoid unbounded growth
+        return c
+    }()
     private static let throttleInterval: TimeInterval = 60 // seconds
+    private static let maxKeyMessageLength: Int = 200
 
     init(siteTab: SiteTab) {
         self.siteTab = siteTab
@@ -100,15 +106,21 @@ final class ConsoleMessageHandler: NSObject, WKScriptMessageHandler {
         }
 
         // Throttle repeated identical messages to once per `throttleInterval`
+        // Shorten message portion to limit key size and overall cache growth.
         let siteName = tab.site.name
         var sanitized = trimmed
-        if sanitized.count > 500 { sanitized = String(sanitized.prefix(500)) + "...[truncated]" }
+        if sanitized.count > ConsoleMessageHandler.maxKeyMessageLength {
+            sanitized = String(sanitized.prefix(ConsoleMessageHandler.maxKeyMessageLength)) + "...[truncated]"
+        }
         let key = "\(siteName)|\(level)|\(sanitized)"
         let now = Date()
-        if let last = ConsoleMessageHandler.recentMessages[key], now.timeIntervalSince(last) < ConsoleMessageHandler.throttleInterval {
-            return
+        if let lastNs = ConsoleMessageHandler.recentMessages.object(forKey: key as NSString) {
+            let last = lastNs as Date
+            if now.timeIntervalSince(last) < ConsoleMessageHandler.throttleInterval {
+                return
+            }
         }
-        ConsoleMessageHandler.recentMessages[key] = now
+        ConsoleMessageHandler.recentMessages.setObject(now as NSDate, forKey: key as NSString)
 
         // Only log warnings/errors by default. For "log" level we keep only notable messages.
         let shouldLog: Bool
