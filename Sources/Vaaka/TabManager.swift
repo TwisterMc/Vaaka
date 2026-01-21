@@ -168,19 +168,14 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
                 return decisionHandler(.allow)
             }
 
-            // If the link target actually belongs to the same site (including registrable root), allow it in-app
-            // Special-case Gmail's data-saferedirecturl: Gmail wraps external links with a same-site redirect URL
-            // that contains the real destination in the "data-saferedirecturl" query parameter. In this case
-            // prefer to open the decoded destination externally instead of navigating inside the Gmail tab.
-            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-               let items = components.queryItems,
-               let safeValue = items.first(where: { $0.name == "data-saferedirecturl" })?.value,
-               !safeValue.isEmpty {
-                // The parameter is percent-encoded; attempt to decode it (try twice to be robust)
-                var decoded = safeValue.removingPercentEncoding ?? safeValue
-                if let twice = decoded.removingPercentEncoding, twice != decoded { decoded = twice }
-                if let targetURL = URL(string: decoded), let scheme = targetURL.scheme?.lowercased(), (scheme == "https" || scheme == "http") {
-                    NSWorkspace.shared.open(targetURL)
+            // If this looks like a wrapped/redirect link (Gmail link shim, Outlook Safe Links, Facebook link shim, etc.),
+            // attempt to unwrap and open the final destination externally. If the decoded destination belongs to the
+            // same site, allow it in-app instead.
+            if let unwrapped = RedirectUnwrapper.unwrap(url) {
+                if let targetHost = unwrapped.host, SiteManager.hostMatches(host: targetHost, siteHost: site.url.host) {
+                    return decisionHandler(.allow)
+                } else {
+                    NSWorkspace.shared.open(unwrapped)
                     return decisionHandler(.cancel)
                 }
             }
