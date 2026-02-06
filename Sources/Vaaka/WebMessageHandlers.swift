@@ -32,11 +32,35 @@ final class NotificationMessageHandler: NSObject, WKScriptMessageHandler {
             let title = body["title"] as? String ?? ""
             let notificationBody = body["body"] as? String ?? ""
             let jsId = body["id"] as? String
-            // Deduping is handled on native side; increment unread if tab not active
+
+            // Simple native-side dedupe: avoid repeating the same JS notification within 30s
+            let dedupeKey: String = jsId ?? ("\(title)-\(notificationBody)-\(body["tag"] as? String ?? "")")
+            let now = Date()
+            if let last = tab.lastNotificationTimes[dedupeKey], now.timeIntervalSince(last) < 30 {
+                Logger.shared.debug("[DEBUG] Suppressing duplicate notification for key=\(dedupeKey)")
+                return
+            }
+            tab.lastNotificationTimes[dedupeKey] = now
+
+            // Increment unread only if the tab is not active
             let isActive = (SiteTabManager.shared.activeTab()?.site.id == tab.site.id)
             DispatchQueue.main.async {
                 if !isActive { UnreadManager.shared.increment(for: tab.site.id) }
-                NotificationManager.shared.sendNotification(title: title, body: notificationBody, siteId: tab.site.id, jsNotificationId: jsId)
+
+                // Ask NotificationManager to send and then ACK back to the page so the page can correlate
+                NotificationManager.shared.sendNotification(title: title, body: notificationBody, siteId: tab.site.id, jsNotificationId: jsId) { identifier in
+                    guard let jsId = jsId else { return }
+                    // Mark the JS-side notification as shown by native (helps pages decide whether to call onclick)
+                    let ack = "(function(){ try{ if(window.__vaaka_notifications && window.__vaaka_notifications['\(jsId)']) { window.__vaaka_notifications['\(jsId)'].nativeShown = true; } }catch(e){} })()"
+                    tab.webView.evaluateJavaScript(ack, completionHandler: nil)
+                }
+            }
+            return
+        }
+
+        if type == "close" {
+            if let jsId = body["id"] as? String {
+                NotificationManager.shared.closeNotification(jsId: jsId)
             }
             return
         }

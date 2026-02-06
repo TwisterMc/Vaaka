@@ -22,7 +22,10 @@ final class BadgeTitleParsingTests: XCTestCase {
     }
 
     func testFallbackNumber() throws {
-        XCTAssertEqual(BadgeDetector.parseTitleCount("Foo 8 Bar"), 8)
+        // Conservative: generic embedded numbers should NOT be treated as badges
+        XCTAssertEqual(BadgeDetector.parseTitleCount("Foo 8 Bar"), 0)
+        XCTAssertEqual(BadgeDetector.parseTitleCount("Inbox — 7"), 7)
+        XCTAssertEqual(BadgeDetector.parseTitleCount("3 • Slack"), 3)
     }
 
     func testRejectsLargeNumbers() throws {
@@ -32,5 +35,7 @@ final class BadgeTitleParsingTests: XCTestCase {
 
     func testIgnoresNonNumber() throws {
         XCTAssertEqual(BadgeDetector.parseTitleCount("No unread items"), 0)
+        XCTAssertEqual(BadgeDetector.parseTitleCount("Report 2026 - Q1"), 0)
+        XCTAssertEqual(BadgeDetector.parseTitleCount("Invoice #42 Paid"), 0)
     }
 }

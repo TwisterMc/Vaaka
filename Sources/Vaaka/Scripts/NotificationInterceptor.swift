@@ -132,6 +132,9 @@ struct NotificationInterceptor {
         // Apply overrides
         window.Notification = NotificationProxy;
         
+        // Ensure pages have the notification-helper object so they don't queue waiting for us
+        try { window.__vaaka_notifications = window.__vaaka_notifications || {}; } catch(e) {}
+
         // Only add ServiceWorker if missing
         if (!navigator.serviceWorker) {
             Object.defineProperty(navigator, 'serviceWorker', {
