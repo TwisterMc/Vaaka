@@ -66,9 +66,9 @@ final class SiteTab: NSObject {
         Logger.shared.debug("[DEBUG][SiteTab] init site=\(site.name) webView=\(ObjectIdentifier(self.webView)) config=\(ObjectIdentifier(self.webView.configuration)) ucc=\(ObjectIdentifier(self.webView.configuration.userContentController)) dataStore=\(ObjectIdentifier(self.webView.configuration.websiteDataStore))")
         #endif
 
-        // Inject a tiny documentStart handshake so page scripts can detect native availability immediately
-        let handshakeScript = WKUserScript(source: NativeHandshake.script, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-        ucc.addUserScript(handshakeScript)
+        // Always inject badge detection (works even without simulation)
+        let badgeScript = WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
+        ucc.addUserScript(badgeScript)
 
         // Inject console forwarder to capture JS console/error messages for debugging
         let consoleScript = WKUserScript(source: ConsoleForwarder.script, injectionTime: .atDocumentStart, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
@@ -76,10 +76,6 @@ final class SiteTab: NSObject {
         let cHandler = ConsoleMessageHandler(siteTab: self)
         self.consoleHandler = cHandler
         ucc.add(cHandler, name: "consoleMessage")
-
-        // Always inject badge detection (works even without simulation)
-        let badgeScript = WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
-        ucc.addUserScript(badgeScript)
 
         // If a badge handler wasn't created above (simulation disabled), register a lightweight one
         if self.badgeHandler == nil {
@@ -248,11 +244,6 @@ final class SiteTab: NSObject {
 
             // Reinstall user scripts / handlers bound to this SiteTab
             let ucc = new.configuration.userContentController
-
-            // Handshake must be earliest so page scripts won't need to queue
-            let handshakeScript = WKUserScript(source: NativeHandshake.script, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-            ucc.addUserScript(handshakeScript)
-
             let badgeScript = WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
             ucc.addUserScript(badgeScript)
             let consoleScript = WKUserScript(source: ConsoleForwarder.script, injectionTime: .atDocumentStart, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
@@ -266,46 +257,11 @@ final class SiteTab: NSObject {
                 let badgeHandler = BadgeUpdateHandler(siteTab: self)
                 self.badgeHandler = badgeHandler
                 ucc.add(badgeHandler, name: "badgeUpdate")
-
-                // If the page queued messages before the native handler was visible, pull them now and process.
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
-                    let js = "(function(){ const q = window.__vaaka_pendingMessages || []; window.__vaaka_pendingMessages = []; return q; })()"
-                    self.webView.evaluateJavaScript(js) { result, err in
-                        guard err == nil, let arr = result as? [[String: Any]] else { return }
-                        for item in arr {
-                            if let name = item["name"] as? String, name == "badgeUpdate", let payload = item["payload"] as? [String: Any], let count = payload["count"] as? Int {
-                                UnreadManager.shared.set(count, for: self.site.id)
-                            }
-                        }
-                    }
-                }
             }
 
             let nHandler = NotificationMessageHandler(siteTab: self)
             self.notificationHandler = nHandler
             ucc.add(nHandler, name: "notificationRequest")
-
-            // Also flush any queued notificationRequest messages so pages that attempted to show
-            // a notification from the head don't get dropped.
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                let js = "(function(){ const q = window.__vaaka_pendingMessages || []; window.__vaaka_pendingMessages = []; return q; })()"
-                self.webView.evaluateJavaScript(js) { result, err in
-                    guard err == nil, let arr = result as? [[String: Any]] else { return }
-                    for item in arr {
-                        if let name = item["name"] as? String, name == "notificationRequest", let payload = item["payload"] as? [String: Any] {
-                            let title = payload["title"] as? String ?? ""
-                            let body = payload["body"] as? String ?? ""
-                            let jsId = payload["id"] as? String
-                            // Treat queued notifications as coming from an inactive tab for unread counting
-                            let isActive = (SiteTabManager.shared.activeTab()?.site.id == self.site.id)
-                            if !isActive { UnreadManager.shared.increment(for: self.site.id) }
-                            NotificationManager.shared.sendNotification(title: title, body: body, siteId: self.site.id, jsNotificationId: jsId, completion: nil)
-                        }
-                    }
-                }
-            }
 
             // Reinstall context menu interceptor
             let ctxScript = WKUserScript(source: ContextMenuInterceptor.script, injectionTime: .atDocumentStart, forMainFrameOnly: false)

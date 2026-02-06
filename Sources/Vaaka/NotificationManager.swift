@@ -109,33 +109,18 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Send a notification using UserNotifications framework
-    /// - Parameters:
-    ///   - title: notification title
-    ///   - body: notification body
-    ///   - siteId: originating site id
-    ///   - jsNotificationId: optional JS-side id to correlate
-    ///   - completion: called with the delivered notification identifier (if any)
-    func sendNotification(title: String, body: String, siteId: String, jsNotificationId: String? = nil, completion: ((String?) -> Void)? = nil) {
+    func sendNotification(title: String, body: String, siteId: String, jsNotificationId: String? = nil) {
         // Check if notifications are globally enabled (opt-in: default to disabled if key doesn't exist)
         let globalEnabled = UserDefaults.standard.object(forKey: "Vaaka.NotificationsEnabledGlobal") as? Bool ?? false
-        guard globalEnabled else { print("[DEBUG] sendNotification: global notifications disabled"); completion?(nil); return }
+        guard globalEnabled else { print("[DEBUG] sendNotification: global notifications disabled"); return }
 
         // Check if notifications are enabled for this site (opt-in: default to disabled)
-        guard isEnabledForSite(siteId) else { print("[DEBUG] sendNotification: notifications disabled for site \(siteId)"); completion?(nil); return }
-
-        // Simple JS-level dedupe: if a jsNotificationId was sent very recently, skip
-        if let jsId = jsNotificationId {
-            if let entry = jsNotificationMap[jsId], Date().timeIntervalSince(entry.time) < 30 {
-                Logger.shared.debug("[DEBUG] sendNotification: dedup suppressed for jsId=\(jsId)")
-                completion?(entry.identifier)
-                return
-            }
-        }
+        guard isEnabledForSite(siteId) else { print("[DEBUG] sendNotification: notifications disabled for site \(siteId)"); return }
 
         // Ensure center exists - if initialization cannot complete, skip
         ensureCenter { [weak self] in
-            guard let self = self else { print("[DEBUG] sendNotification: self nil"); completion?(nil); return }
-            guard let center = self.center else { print("[DEBUG] sendNotification: notification center unavailable"); completion?(nil); return }
+            guard let self = self else { print("[DEBUG] sendNotification: self nil"); return }
+            guard let center = self.center else { print("[DEBUG] sendNotification: notification center unavailable"); return }
 
             DispatchQueue.main.async {
                 let content = UNMutableNotificationContent()
@@ -150,14 +135,8 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                 center.add(request) { error in
                     if let error = error {
                         print("[ERROR] Failed to schedule notification: \(error)")
-                        completion?(nil)
                     } else {
                         print("[DEBUG] Notification sent for site: \(siteId) id=\(jsNotificationId ?? "<none>")")
-                        // Record mapping for dedupe/close support
-                        if let jsId = jsNotificationId {
-                            self.jsNotificationMap[jsId] = (identifier: identifier, time: Date())
-                        }
-                        completion?(identifier)
                     }
                 }
             }
@@ -254,8 +233,6 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
         completionHandler()
     }
-    private var jsNotificationMap: [String: (identifier: String, time: Date)] = [:]
-
     private func initializeCenter(completion: (() -> Void)?) {
         guard self.center == nil else {
             completion?()
@@ -279,15 +256,5 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
 
         completion?()
-    }
-
-    /// Close a JS-originated notification (page asked to close it)
-    func closeNotification(jsId: String) {
-        guard let entry = jsNotificationMap[jsId] else { return }
-        ensureCenter { [weak self] in
-            guard let center = self?.center else { return }
-            center.removeDeliveredNotifications(withIdentifiers: [entry.identifier])
-            self?.jsNotificationMap.removeValue(forKey: jsId)
-        }
     }
 }
