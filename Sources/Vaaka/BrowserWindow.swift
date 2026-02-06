@@ -1019,6 +1019,10 @@ class BrowserWindowController: NSWindowController {
             badgeLabel.alignment = .center
             badgeLabel.setAccessibilityHidden(true)
             badgeContainer.addSubview(badgeLabel)
+            // Ensure the label resists compression so multi-digit counts remain readable,
+            // and prefer the container size to hug its content horizontally.
+            badgeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+            badgeContainer.setContentHuggingPriority(.defaultHigh, for: .horizontal)
             NSLayoutConstraint.activate([
                 badgeLabel.leadingAnchor.constraint(equalTo: badgeContainer.leadingAnchor, constant: 4),
                 badgeLabel.trailingAnchor.constraint(equalTo: badgeContainer.trailingAnchor, constant: -4),
@@ -1061,11 +1065,15 @@ class BrowserWindowController: NSWindowController {
                 spinner.centerYAnchor.constraint(equalTo: imageView.centerYAnchor)
             ])
 
-            // Position badge at top-right of the favicon
+            // Position badge at top-right of the favicon. Constrain the badge so it may
+            // overlap the favicon but never extend past the rail item's right edge.
             NSLayoutConstraint.activate([
                 badgeContainer.heightAnchor.constraint(equalToConstant: 16),
                 badgeContainer.centerYAnchor.constraint(equalTo: imageView.topAnchor, constant: 2),
-                badgeContainer.centerXAnchor.constraint(equalTo: imageView.trailingAnchor, constant: -2)
+                // Keep the badge visually attached to the favicon but allow it to shift left
+                // when there's not enough room — prevent it from overflowing the rail view.
+                badgeContainer.leadingAnchor.constraint(greaterThanOrEqualTo: imageView.trailingAnchor, constant: -8),
+                badgeContainer.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -6)
             ])
 
             // Accessibility: make this rail item an accessibility element (acts like a button)
