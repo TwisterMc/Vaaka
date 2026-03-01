@@ -184,9 +184,13 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
                 return decisionHandler(.allow)
             }
 
-            // If the link looks like an SSO/IdP target, open externally by default to avoid embedded-browser failures.
+            // If the link looks like an SSO/IdP target, keep first-party auth flows in-app
+            // (e.g., Gmail/Calendar -> accounts.google.com), but still open external SSO links in the browser.
             let isSSO = SSODetector.isSSO(url)
             if isSSO {
+                if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
+                    return decisionHandler(.allow)
+                }
                 NSWorkspace.shared.open(url)
                 return decisionHandler(.cancel)
             }
@@ -304,10 +308,25 @@ private final class SelfUIDelegate: NSObject, WKUIDelegate {
                 return nil
             }
 
-            // Gmail-specific: always open new-window links externally
+            // Keep first-party SSO popup flows inside the current tab (e.g., Gmail/Calendar -> accounts.google.com).
+            if navigationAction.targetFrame == nil || navigationAction.targetFrame?.isMainFrame == false,
+               let targetHost = url.host,
+               SiteManager.hostMatches(host: targetHost, siteHost: site.url.host),
+               SSODetector.isSSO(url) {
+                webView.load(URLRequest(url: url))
+                return nil
+            }
+
+            // Gmail-specific: some actions use window.open for first-party flows (including sign-in).
+            // Keep first-party destinations in-app; only send truly external destinations to the default browser.
             if let host = site.url.host, host.contains("mail.google.com") {
                 // If this is a new window/tab request (targetFrame is nil or not main frame), open externally
                 if navigationAction.targetFrame == nil || navigationAction.targetFrame?.isMainFrame == false {
+                    if let targetHost = url.host,
+                       SiteManager.hostMatches(host: targetHost, siteHost: site.url.host) {
+                        webView.load(URLRequest(url: url))
+                        return nil
+                    }
                     NSWorkspace.shared.open(url)
                     return nil
                 }

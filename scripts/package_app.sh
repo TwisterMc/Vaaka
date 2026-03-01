@@ -27,6 +27,11 @@ if [ -d Resources ]; then
     cp -R Resources/ build/Vaaka.app/Contents/Resources/
 fi
 
+# Use the SwiftPM target resource as the single source of truth for default sites
+if [ -f Sources/Vaaka/Resources/whitelist.json ]; then
+    cp Sources/Vaaka/Resources/whitelist.json build/Vaaka.app/Contents/Resources/whitelist.json
+fi
+
 # Copy Info.plist from wherever it actually is
 if [ -f Info.plist ]; then
     cp Info.plist build/Vaaka.app/Contents/Info.plist

@@ -4,19 +4,13 @@
     {
       "id": "apple",
       "name": "Apple",
-      "url": "https://apple.com",
+      "url": "https://www.apple.com",
       "favicon": null
     },
     {
       "id": "github",
       "name": "GitHub",
-      "url": "https://github.com",
-      "favicon": null
-    },
-    {
-      "id": "google",
-      "name": "Google",
-      "url": "https://www.google.com",
+      "url": "https://github.com/TwisterMc/Vaaka",
       "favicon": null
     }
   ]

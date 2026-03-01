@@ -88,7 +88,7 @@ final class SiteManager {
         }
 
         if sites.isEmpty {
-            if let appleURL = URL(string: "https://apple.com") {
+            if let appleURL = URL(string: "https://www.apple.com") {
                 let s = Site(id: "apple-default", name: "Apple", url: appleURL, favicon: nil)
                 sites = [s]
                 // Persist the seeded list so users can modify it later
