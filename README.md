@@ -2,6 +2,8 @@
 
 Vaaka is a macOS browser built for focus and efficiency. It replaces traditional tab management with a fixed, predefined site list that you configure in settings. Each whitelisted site gets one tab on the left sidebar. Leaving the whitelisted sites opens your default browser. No address bar, no mess of tabs, just the sites you whitelist.
 
+## Prototype Software - This is an early prototype. It's not perfect, but it's a solid proof of concept.
+
 ![Vaaka Screenshot](screenshot.png)
 
 ## Vaaka - "Vah-kah" (Finnish)
@@ -35,14 +37,15 @@ The idea came from the Fluid app from back in the day, where I could whiltelist 
 
 Download the latest release from [Releases](https://github.com/twistermc/Vaaka/releases), un-compress, and drag `Vaaka.app` to your Applications folder.
 
-This app is self-signed and notarized by Apple. The first time you open it, you will need to approve it in System Preferences > Security & Privacy. If you download a new version, you'll have to follow the same steps again.
+This app is currently **not code signed or notarized**. On first launch, macOS **will block it**.
+To open it: go to **System Settings → Privacy & Security**, then click **Open Anyway** for Vaaka. If you download a new version, you'll have to follow the same steps again.
 
-It's not signed because I don't want to pay Apple the fee for a developer account at this time.
+It's not signed because I haven't paid Apple the fee for a developer account at this time.
 
 ## Requirements:
 
 - macOS 14.0 or later
-- Apple Silicon (M1+) or Intel
+- Apple Silicon or Intel
 
 ## Donate
 
