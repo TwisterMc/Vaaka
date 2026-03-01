@@ -10,7 +10,13 @@ Vaaka is a macOS browser built for focus and efficiency. It replaces traditional
 
 Means "scale" or "balance."
 
-### Background
+## Help Wanted
+
+If you have experience with SwiftUI, WebKit, or macOS development and want to contribute, feel free to make pull requests.
+
+If you want to help me get the app signed and notarized, I would greatly appreciate it.
+
+## Background
 
 The idea came from the Fluid app from back in the day, where I could whiltelist individual sites and have a browser that was specifically for those sites. Think SSB/progressive-web apps, but all in one window.
 
