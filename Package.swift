@@ -8,16 +8,25 @@ let package = Package(
         .executable(name: "Vaaka", targets: ["Vaaka"])
     ],
     targets: [
+        .target(
+            name: "VaakaLib",
+            dependencies: [],
+            path: "Sources/VaakaLib",
+            resources: [
+                .process("Resources")
+            ]
+        ),
         .executableTarget(
             name: "Vaaka",
-            dependencies: [],
+            dependencies: ["VaakaLib"],
+            path: "Sources/Vaaka",
             resources: [
                 .process("Resources")
             ]
         ),
         .testTarget(
             name: "VaakaTests",
-            dependencies: ["Vaaka"],
+            dependencies: ["VaakaLib"],
             path: "Tests/VaakaTests"
         )
     ]

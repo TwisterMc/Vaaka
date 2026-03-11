@@ -1,10 +1,14 @@
 import Cocoa
 import WebKit
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+public class AppDelegate: NSObject, NSApplicationDelegate {
     var windowController: BrowserWindowController?
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    public override init() {
+        super.init()
+    }
+
+    public func applicationDidFinishLaunching(_ notification: Notification) {
         // Ensure sites are loaded from settings (bundled or persisted)
         SiteManager.shared.loadSites()
 
@@ -72,7 +76,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
         // Autosave/cleanup handlers could be added here
 
-    func applicationWillTerminate(_ notification: Notification) {
+    public func applicationWillTerminate(_ notification: Notification) {
         saveSession()
     }
 
@@ -193,7 +197,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
     }
 }

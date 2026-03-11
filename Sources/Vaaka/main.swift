@@ -1,4 +1,5 @@
 import Cocoa
+import VaakaLib
 
 let app = NSApplication.shared
 let delegate = AppDelegate()
