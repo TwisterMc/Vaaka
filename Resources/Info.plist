@@ -22,5 +22,12 @@
 	<string>14.0</string>
 	<key>NSUserNotificationAlertStyle</key>
 	<string>alert</string>
+	<key>WKAppBoundDomains</key>
+	<array>
+		<string>slack.com</string>
+		<string>google.com</string>
+		<string>monday.com</string>
+		<string>github.com</string>
+	</array>
 </dict>
 </plist>
