@@ -14,6 +14,37 @@ extension Notification.Name {
 final class SiteTabManager: NSObject {
     static let shared = SiteTabManager()
 
+    // Track short-lived expected interruptions (downloads) per site id.
+    // Stored as DispatchWorkItem so we can cancel scheduled clears when download finishes.
+    private var expectedInterruptions: [String: DispatchWorkItem] = [:]
+
+    /// Mark that a download-related interruption is expected for `siteId`. The marker auto-clears after `timeout` seconds.
+    func markExpectedInterruption(siteId: String, timeout: TimeInterval = 5.0) {
+        // Cancel any existing work item
+        if let existing = expectedInterruptions[siteId] {
+            existing.cancel()
+            expectedInterruptions.removeValue(forKey: siteId)
+        }
+        let wi = DispatchWorkItem { [weak self] in
+            self?.expectedInterruptions.removeValue(forKey: siteId)
+        }
+        expectedInterruptions[siteId] = wi
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: wi)
+        Logger.shared.debug("[DEBUG] Marked expected interruption for siteId=\(siteId) timeout=\(timeout)s")
+    }
+
+    func clearExpectedInterruption(siteId: String) {
+        if let wi = expectedInterruptions[siteId] {
+            wi.cancel()
+            expectedInterruptions.removeValue(forKey: siteId)
+            Logger.shared.debug("[DEBUG] Cleared expected interruption for siteId=\(siteId)")
+        }
+    }
+
+    func isExpectedInterruption(siteId: String) -> Bool {
+        return expectedInterruptions[siteId] != nil
+    }
+
     private var isBootstrapping: Bool = true
 
     private(set) var tabs: [SiteTab] = [] {
@@ -217,13 +248,27 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let nsErr = error as NSError
+        // Always signal finish so UI stops spinners
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
+        // If this failure is expected due to a download interruption, suppress the error notification and clear marker
+        if SiteTabManager.shared.isExpectedInterruption(siteId: site.id) {
+            Logger.shared.debug("[DEBUG] Ignoring expected provisional navigation interruption for site: \(site.name) code=\(nsErr.code) domain=\(nsErr.domain)")
+            SiteTabManager.shared.clearExpectedInterruption(siteId: site.id)
+            return
+        }
         NotificationCenter.default.post(name: .SiteTabDidFailLoading, object: nil, userInfo: ["siteId": site.id, "url": webView.url?.absoluteString ?? "<no-url>", "errorDomain": nsErr.domain, "errorCode": nsErr.code, "errorDescription": nsErr.localizedDescription])
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         let nsErr = error as NSError
+        // Always signal finish so UI stops spinners
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
+        // Suppress expected errors caused by downloads
+        if SiteTabManager.shared.isExpectedInterruption(siteId: site.id) {
+            Logger.shared.debug("[DEBUG] Ignoring expected navigation interruption for site: \(site.name) code=\(nsErr.code) domain=\(nsErr.domain)")
+            SiteTabManager.shared.clearExpectedInterruption(siteId: site.id)
+            return
+        }
         NotificationCenter.default.post(name: .SiteTabDidFailLoading, object: nil, userInfo: ["siteId": site.id, "url": webView.url?.absoluteString ?? "<no-url>", "errorDomain": nsErr.domain, "errorCode": nsErr.code, "errorDescription": nsErr.localizedDescription])
     }
 
@@ -237,18 +282,37 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        Logger.shared.debug("[DEBUG] navigationResponse: url=\(navigationResponse.response.url?.absoluteString ?? "nil"), canShowMIME=\(navigationResponse.canShowMIMEType)")
+        
         // If the response is not displayable by WebKit (e.g., unknown MIME) or explicitly marked as an attachment,
         // treat it as a download so we can manage it via WKDownload and avoid embedding potentially large or binary blobs.
         if !navigationResponse.canShowMIMEType {
+            Logger.shared.debug("[DEBUG] Treating as download: canShowMIMEType=false")
             return decisionHandler(.download)
         }
 
         if let http = navigationResponse.response as? HTTPURLResponse,
            let cd = http.allHeaderFields["Content-Disposition"] as? String,
            cd.lowercased().contains("attachment") {
+            Logger.shared.debug("[DEBUG] Treating as download: Content-Disposition=attachment")
             return decisionHandler(.download)
         }
 
+        // Detect common download URL patterns that may not have Content-Disposition header
+        if let url = navigationResponse.response.url, let urlString = url.absoluteString.lowercased() as String? {
+            // GitHub release/asset downloads
+            if urlString.contains("/releases/download/") || urlString.contains("/archive/") {
+                Logger.shared.debug("[DEBUG] Treating as download: GitHub release/archive pattern")
+                return decisionHandler(.download)
+            }
+            // Common download endpoints
+            if urlString.contains("/api/download") || urlString.contains("/file/download") {
+                Logger.shared.debug("[DEBUG] Treating as download: API download pattern")
+                return decisionHandler(.download)
+            }
+        }
+
+        Logger.shared.debug("[DEBUG] Allowing navigation response")
         decisionHandler(.allow)
     }
 
@@ -263,9 +327,11 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
             // rows with 0% progress when the user cancels the Save panel.
             tab.registerDownloadHandler(handler, for: download)
             download.delegate = handler
-        }
-    }
-}
+            // Mark that an interruption is expected for this site's navigation while the download starts
+            SiteTabManager.shared.markExpectedInterruption(siteId: tab.site.id)
+         }
+     }
+ }
 
 // Handle actions coming from our internal error page (Retry / Open in Browser / Dismiss)
 final class ErrorMessageHandler: NSObject, WKScriptMessageHandler {
@@ -358,5 +424,3 @@ private final class SelfUIDelegate: NSObject, WKUIDelegate {
         }
     }
 }
-
-

@@ -55,7 +55,7 @@ final class DownloadsManager: NSObject {
     func addExternalDownload(id: String, siteId: String, sourceURL: URL?, suggestedFilename: String, destination: URL?, taskIdentifier: Int?) {
         Logger.shared.debug("[DEBUG] DownloadsManager.addExternalDownload id=\(id) site=\(siteId) destination=\(destination?.path ?? "<nil>")")
         queue.sync {
-            var d = DownloadItem(id: id, siteId: siteId, sourceURL: sourceURL, suggestedFilename: suggestedFilename, destinationURL: destination, progress: 0.0, status: .inProgress, errorMessage: nil)
+            let d = DownloadItem(id: id, siteId: siteId, sourceURL: sourceURL, suggestedFilename: suggestedFilename, destinationURL: destination, progress: 0.0, status: .inProgress, errorMessage: nil)
             items[id] = d
             if let tid = taskIdentifier { taskToId[tid] = id }
         }
@@ -141,7 +141,7 @@ final class DownloadsManager: NSObject {
     }
 
     func unregisterCancellable(id: String) {
-        queue.sync { cancellables.removeValue(forKey: id) }
+        _ = queue.sync { cancellables.removeValue(forKey: id) }
     }
 
     // Start an external URL download (used for image Save As flow)

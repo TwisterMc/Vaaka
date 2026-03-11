@@ -215,6 +215,8 @@ final class DownloadsBarView: NSView {
         stack.spacing = 6
         stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
         stack.translatesAutoresizingMaskIntoConstraints = false
+        // Allow stack to compress to 0 height when parent is collapsed
+        stack.setContentCompressionResistancePriority(.init(1), for: .vertical)
         addSubview(stack)
 
         NSLayoutConstraint.activate([
@@ -225,8 +227,9 @@ final class DownloadsBarView: NSView {
 
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor)
+            stack.topAnchor.constraint(equalTo: topAnchor)
+            // Do NOT pin stack.bottomAnchor to avoid conflict when bar height is 0
+            // Stack will size naturally and be clipped when bar is collapsed
         ])
 
         updateColors()
@@ -326,5 +329,8 @@ final class DownloadsBarView: NSView {
             stack.removeArrangedSubview(v)
             stack.addArrangedSubview(v)
         }
+        
+        // Hide stack when empty to avoid NSStackView.Empty.Height.Min constraint conflicts
+        stack.isHidden = items.isEmpty
     }
 }
