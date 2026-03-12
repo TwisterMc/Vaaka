@@ -1,6 +1,6 @@
 import XCTest
 import AppKit
-@testable import Vaaka
+@testable import VaakaLib
 
 final class GenerateMonoIconTests: XCTestCase {
     func testGenerateMonoIconStripsWWW() throws {

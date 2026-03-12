@@ -1,6 +1,6 @@
 import XCTest
 import AppKit
-@testable import Vaaka
+@testable import VaakaLib
 
 class MockURLProtocol: URLProtocol {
     static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data?))?

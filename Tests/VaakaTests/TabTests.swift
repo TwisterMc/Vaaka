@@ -1,6 +1,6 @@
 import XCTest
 import WebKit
-@testable import Vaaka
+@testable import VaakaLib
 
 final class TabTests: XCTestCase {
     func testSiteTabHasSafariUserAgent() {

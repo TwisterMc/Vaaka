@@ -1,5 +1,5 @@
 import XCTest
-@testable import Vaaka
+@testable import VaakaLib
 
 final class BadgeTitleParsingTests: XCTestCase {
     func testParenthesis() throws {

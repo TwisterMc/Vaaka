@@ -1,6 +1,6 @@
 import XCTest
 import AppKit
-@testable import Vaaka
+@testable import VaakaLib
 
 final class FaviconSaveLoadTests: XCTestCase {
     func testSaveAndLoadRoundtrip() throws {
