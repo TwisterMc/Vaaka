@@ -221,6 +221,15 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
                 }
             }
 
+            // If the URL looks like a redirect/wrapper (even if we couldn't unwrap it), don't allow it just
+            // because its domain matches. The domain check below is for normal same-domain navigation, not
+            // for redirect wrappers which should be opened externally.
+            if RedirectUnwrapper.looksLikeRedirect(url) {
+                // We couldn't unwrap it, so treat it as external
+                NSWorkspace.shared.open(url)
+                return decisionHandler(.cancel)
+            }
+
             if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
                 return decisionHandler(.allow)
             }

@@ -59,4 +59,42 @@ final class RedirectUnwrapperTests: XCTestCase {
         let un = RedirectUnwrapper.unwrap(u)
         XCTAssertNil(un)
     }
+
+    // MARK: - looksLikeRedirect tests
+
+    func testLooksLikeRedirectGmailWithParam() throws {
+        let raw = "https://mail.google.com/mail/u/0/?ui=2&data-saferedirecturl=https%3A%2F%2Fexample.com"
+        let u = URL(string: raw)!
+        XCTAssertTrue(RedirectUnwrapper.looksLikeRedirect(u))
+    }
+
+    func testLooksLikeRedirectFacebookHost() throws {
+        let raw = "https://l.facebook.com/l.php?u=https%3A%2F%2Fexample.com&h=abc"
+        let u = URL(string: raw)!
+        XCTAssertTrue(RedirectUnwrapper.looksLikeRedirect(u))
+    }
+
+    func testLooksLikeRedirectShortener() throws {
+        let raw = "https://t.co/abcdef"
+        let u = URL(string: raw)!
+        XCTAssertTrue(RedirectUnwrapper.looksLikeRedirect(u))
+    }
+
+    func testLooksLikeRedirectWithGenericParam() throws {
+        let raw = "https://example.com/page?url=https%3A%2F%2Fother.com"
+        let u = URL(string: raw)!
+        XCTAssertTrue(RedirectUnwrapper.looksLikeRedirect(u))
+    }
+
+    func testDoesNotLookLikeRedirectNormalUrl() throws {
+        let raw = "https://example.com/page?id=123&name=test"
+        let u = URL(string: raw)!
+        XCTAssertFalse(RedirectUnwrapper.looksLikeRedirect(u))
+    }
+
+    func testDoesNotLookLikeRedirectNoParams() throws {
+        let raw = "https://example.com/page"
+        let u = URL(string: raw)!
+        XCTAssertFalse(RedirectUnwrapper.looksLikeRedirect(u))
+    }
 }

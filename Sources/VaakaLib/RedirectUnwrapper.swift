@@ -53,6 +53,31 @@ enum RedirectUnwrapper {
         return nil
     }
 
+    /// Check if a URL looks like it could be a redirect/wrapper URL, even if unwrapping failed.
+    /// This helps detect wrapper URLs that we can't unwrap, preventing them from being
+    /// automatically allowed just because their domain matches.
+    static func looksLikeRedirect(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        
+        // If it's from a known redirect host, it's likely a wrapper
+        if hostsWithParams.keys.contains(host) || knownShorteners.contains(host) {
+            return true
+        }
+        
+        // If it has query parameters that look like redirect parameters, it might be a wrapper
+        if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false), comps.queryItems != nil {
+            let redirectParamNames = ["data-saferedirecturl", "url", "u", "redirect", "target", "dest", "q"]
+            let hasRedirectParam = comps.queryItems?.contains(where: { item in
+                redirectParamNames.contains(item.name)
+            }) ?? false
+            if hasRedirectParam {
+                return true
+            }
+        }
+        
+        return false
+    }
+
     private static func decodeSmart(_ s: String) -> String? {
         // Try up to two iterations of percent-decoding to handle double-encoded values.
         var decoded = s
