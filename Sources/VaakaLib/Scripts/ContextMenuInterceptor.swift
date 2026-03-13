@@ -3,7 +3,8 @@ import Foundation
 struct ContextMenuInterceptor {
     static let script = """
     (function() {
-        // Listen for right-clicks; if the target is an <img> we capture the src and notify native.
+        // Listen for right-clicks on images to enable native Save Image handling.
+        // For other elements (text, links, etc), allow the default WebKit context menu.
         document.addEventListener('contextmenu', function(e) {
             try {
                 var el = e.target;
@@ -22,6 +23,7 @@ struct ContextMenuInterceptor {
                         }
                     }
                 }
+                // For non-images, allow default WebKit context menu to show
             } catch (ex) {
                 try { console.log('[Vaaka] context menu interceptor error:', ex); } catch (e) {}
             }

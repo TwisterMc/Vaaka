@@ -70,16 +70,16 @@ final class VaakaTests: XCTestCase {
 
     func testSiteTabUpdatesSiteMetadata() throws {
         // Ensure existing SiteTab instance receives updated Site metadata when replaceSites is called
-        let site = Site(id: "meta-test", name: "MetaTest", url: URL(string: "https://meta.example.com")!, favicon: nil)
+        let site = Site(id: "github", name: "GitHub", url: URL(string: "https://github.com")!, favicon: nil)
         SiteManager.shared.replaceSites([site])
         let initialTab = SiteTabManager.shared.tabs.first
         XCTAssertNotNil(initialTab)
         // Update site with a favicon
-        let updated = Site(id: "meta-test", name: "MetaTest", url: URL(string: "https://meta.example.com")!, favicon: "meta-test.png")
+        let updated = Site(id: "github", name: "GitHub", url: URL(string: "https://github.com")!, favicon: "github.png")
         SiteManager.shared.replaceSites([updated])
         let afterTab = SiteTabManager.shared.tabs.first
         XCTAssertNotNil(afterTab)
-        XCTAssertEqual(afterTab?.site.favicon, "meta-test.png")
+        XCTAssertEqual(afterTab?.site.favicon, "github.png")
         // Ensure the original SiteTab instance was reused (same object identity)
         XCTAssertTrue(initialTab === afterTab)
     }

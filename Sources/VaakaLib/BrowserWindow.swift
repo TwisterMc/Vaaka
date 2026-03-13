@@ -696,7 +696,7 @@ class BrowserWindowController: NSWindowController {
         // No-op here so the event is delivered normally and the menu action can be invoked.
         // (do not consume the event here)
 
-        // fallthrough (don't consume) 
+        // fallthrough (don't consume)
         return evt
     }
 

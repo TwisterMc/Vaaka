@@ -182,13 +182,23 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { return decisionHandler(.cancel) }
+        Logger.shared.debug("[NAV] navigationType=\(navigationAction.navigationType.rawValue) url=\(url.absoluteString)")
+        
         // Allow data/blob/about:blank navigations (no external open)
         if let scheme = url.scheme?.lowercased(), scheme == "data" || scheme == "blob" || scheme == "about" || url.absoluteString.hasPrefix("about:") {
             return decisionHandler(.allow)
         }
+        
+        // Allow back/forward navigations
+        if navigationAction.navigationType == .backForward {
+            Logger.shared.debug("[NAV] backForward navigation - ALWAYS ALLOWED")
+            return decisionHandler(.allow)
+        }
+        
         // Allow in-page navigation and navigations that remain within the owning site's domain (subdomains allowed).
         // Use hostMatches directly to avoid relying on Site (value) equality which may be brittle across reloads.
         if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
+            Logger.shared.debug("[NAV] Same domain - ALLOWED")
             return decisionHandler(.allow)
         }
 
@@ -250,10 +260,15 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         let nsErr = error as NSError
         // Always signal finish so UI stops spinners
         NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
-        // If this failure is expected due to a download interruption, suppress the error notification and clear marker
+        // Suppress expected errors caused by downloads
         if SiteTabManager.shared.isExpectedInterruption(siteId: site.id) {
             Logger.shared.debug("[DEBUG] Ignoring expected provisional navigation interruption for site: \(site.name) code=\(nsErr.code) domain=\(nsErr.domain)")
             SiteTabManager.shared.clearExpectedInterruption(siteId: site.id)
+            return
+        }
+        // Suppress cancellation errors (-999) which can occur during back/forward navigation
+        if nsErr.code == -999 {
+            Logger.shared.debug("[DEBUG] Ignoring NSURLErrorCancelled (-999) for site: \(site.name)")
             return
         }
         NotificationCenter.default.post(name: .SiteTabDidFailLoading, object: nil, userInfo: ["siteId": site.id, "url": webView.url?.absoluteString ?? "<no-url>", "errorDomain": nsErr.domain, "errorCode": nsErr.code, "errorDescription": nsErr.localizedDescription])
@@ -267,6 +282,11 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
         if SiteTabManager.shared.isExpectedInterruption(siteId: site.id) {
             Logger.shared.debug("[DEBUG] Ignoring expected navigation interruption for site: \(site.name) code=\(nsErr.code) domain=\(nsErr.domain)")
             SiteTabManager.shared.clearExpectedInterruption(siteId: site.id)
+            return
+        }
+        // Suppress cancellation errors (-999) which can occur during back/forward navigation
+        if nsErr.code == -999 {
+            Logger.shared.debug("[DEBUG] Ignoring NSURLErrorCancelled (-999) for site: \(site.name)")
             return
         }
         NotificationCenter.default.post(name: .SiteTabDidFailLoading, object: nil, userInfo: ["siteId": site.id, "url": webView.url?.absoluteString ?? "<no-url>", "errorDomain": nsErr.domain, "errorCode": nsErr.code, "errorDescription": nsErr.localizedDescription])
