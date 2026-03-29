@@ -234,11 +234,14 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
                 return decisionHandler(.allow)
             }
 
-            // If the link looks like an SSO/IdP target, keep first-party auth flows in-app
-            // (e.g., Gmail/Calendar -> accounts.google.com), but still open external SSO links in the browser.
+            // If the link looks like an SSO/IdP target, keep in-app when it is explicitly whitelisted
+            // (e.g., user has accounts.google.com/atlassian.com added, or this is same-domain matching).
             let isSSO = SSODetector.isSSO(url)
             if isSSO {
                 if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
+                    return decisionHandler(.allow)
+                }
+                if SiteManager.shared.isWhitelisted(url: url) {
                     return decisionHandler(.allow)
                 }
                 NSWorkspace.shared.open(url)

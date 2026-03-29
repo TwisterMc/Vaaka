@@ -136,6 +136,7 @@ final class SiteManager {
             if h == siteRoot { return true }
             if h.hasSuffix("." + siteRoot) { return true }
         }
+
         return false
     }
 

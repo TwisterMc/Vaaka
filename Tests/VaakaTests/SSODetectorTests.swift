@@ -6,6 +6,7 @@ final class SSODetectorTests: XCTestCase {
         XCTAssertTrue(SSODetector.isSSO(URL(string: "https://accounts.google.com/signin")!))
         XCTAssertTrue(SSODetector.isSSO(URL(string: "https://login.microsoftonline.com/common/oauth2")!))
         XCTAssertTrue(SSODetector.isSSO(URL(string: "https://example.okta.com/app/xyz/sso/saml")!))
+        XCTAssertTrue(SSODetector.isSSO(URL(string: "https://id.atlassian.com/login")!))
     }
 
     func testSAMLQueryDetection() {

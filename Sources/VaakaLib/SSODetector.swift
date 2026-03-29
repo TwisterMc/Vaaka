@@ -10,13 +10,17 @@ struct SSODetector {
         "accounts.google.com",
         "appleid.apple.com",
         "identity.azure.com",
+        "atlassian.com",
+        "id.atlassian.com",
+        "auth.atlassian.com",
         "sso.mycompany.com" // example placeholder
     ]
 
     private static let knownIdPHostSuffixes: [String] = [
         ".okta.com",
         ".auth0.com",
-        ".login.microsoftonline.com"
+        ".login.microsoftonline.com",
+        ".atlassian.com"
     ]
 
     /// Returns true if the URL looks like an IdP/SSO endpoint based on host or known query/path patterns.

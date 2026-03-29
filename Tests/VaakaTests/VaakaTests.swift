@@ -98,4 +98,24 @@ final class VaakaTests: XCTestCase {
         XCTAssertTrue(SiteManager.hostMatches(host: "sub.example.co.uk", siteHost: "mail.example.co.uk"))
         XCTAssertFalse(SiteManager.hostMatches(host: "evil.com", siteHost: "mail.google.com"))
     }
+
+    func testHostMatchingDoesNotTreatSSOAsSameDomain() throws {
+        XCTAssertFalse(SiteManager.hostMatches(host: "id.atlassian.com", siteHost: "trello.com"))
+        XCTAssertFalse(SiteManager.hostMatches(host: "auth.atlassian.com", siteHost: "bitbucket.org"))
+        XCTAssertTrue(SiteManager.hostMatches(host: "id.atlassian.com", siteHost: "jira.atlassian.com"))
+        XCTAssertFalse(SiteManager.hostMatches(host: "accounts.google.com", siteHost: "gmail.com"))
+        XCTAssertFalse(SiteManager.hostMatches(host: "login.microsoftonline.com", siteHost: "office.com"))
+    }
+
+    func testIsWhitelistedAllowsKnownProviderWhenAdded() throws {
+        var sites = SiteManager.shared.sites
+        let googleSite = Site(id: "accounts-google", name: "Google Accounts", url: URL(string: "https://accounts.google.com")!, favicon: nil)
+        sites.append(googleSite)
+        SiteManager.shared.replaceSites(sites)
+
+        XCTAssertTrue(SiteManager.shared.isWhitelisted(url: URL(string: "https://accounts.google.com/login")!))
+
+        // cleanup to avoid test order dependencies
+        SiteManager.shared.replaceSites(SiteManager.shared.sites.filter { $0.id != "accounts-google" })
+    }
 }
