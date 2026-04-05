@@ -3,97 +3,46 @@ import WebKit
 
 public class AppDelegate: NSObject, NSApplicationDelegate {
     var windowController: BrowserWindowController?
+    private var preferencesWindowController: PreferencesWindowController?
+    private let session = SessionManager()
 
     public override init() {
         super.init()
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        // Ensure sites are loaded from settings (bundled or persisted)
         SiteManager.shared.loadSites()
 
-        // Initialize developer logger (creates log directory/file on first write) and write startup info
         Logger.shared.debug("[DEBUG] Vaaka starting - PID=\(ProcessInfo.processInfo.processIdentifier) bundleId=\(Bundle.main.bundleIdentifier ?? "<nil>")")
 
-        // Refresh favicons periodically (every 7 days)
         SiteManager.shared.refreshFaviconsIfNeeded()
 
-        // Create main browser window
         windowController = BrowserWindowController()
-        // Restore frame before showing the window so it appears with the correct size
-        restoreSession()
-        windowController?.showWindow(self)
+        session.restore(to: windowController?.window)
 
-        // Ensure the app is activated and visible
-        NSApp.activate(ignoringOtherApps: true)
-        windowController?.window?.makeKeyAndOrderFront(nil)
-
-        // Create a minimal app menu so standard actions are available
         createMainMenu()
+
+        windowController?.showWindow(self)
+        NSApp.activate()
+        windowController?.window?.makeKeyAndOrderFront(nil)
     }
-
-    private func sessionFileURL() -> URL? {
-        let fm = FileManager.default
-        if let appSupport = try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true) {
-            let dir = appSupport.appendingPathComponent("Vaaka", isDirectory: true)
-            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-            return dir.appendingPathComponent("session.json")
-        }
-        return nil
-    }
-
-    private struct SessionData: Codable {
-        var frameX: Double
-        var frameY: Double
-        var frameWidth: Double
-        var frameHeight: Double
-    }
-
-    private func saveSession() {
-        guard let wc = windowController, let frame = wc.window?.frame else { return }
-        let session = SessionData(frameX: frame.origin.x, frameY: frame.origin.y,
-                                  frameWidth: frame.size.width, frameHeight: frame.size.height)
-        guard let file = sessionFileURL() else { return }
-        DispatchQueue.global(qos: .utility).async {
-            if let data = try? JSONEncoder().encode(session) {
-                try? data.write(to: file, options: .atomic)
-            }
-        }
-    }
-
-    private func restoreSession() {
-        guard let wc = windowController, let file = sessionFileURL() else { return }
-        guard FileManager.default.fileExists(atPath: file.path),
-              let data = try? Data(contentsOf: file),
-              let session = try? JSONDecoder().decode(SessionData.self, from: data) else { return }
-
-        var rect = NSRect(x: session.frameX, y: session.frameY,
-                          width: session.frameWidth, height: session.frameHeight)
-        let minW: CGFloat = wc.window?.minSize.width ?? 800
-        let minH: CGFloat = wc.window?.minSize.height ?? 400
-        if rect.size.width < minW { rect.size.width = minW }
-        if rect.size.height < minH { rect.size.height = minH }
-        wc.window?.setFrame(rect, display: false)
-
-        // SiteTabManager already restores site tabs and active site
-    }
-        // Autosave/cleanup handlers could be added here
 
     public func applicationWillTerminate(_ notification: Notification) {
-        saveSession()
+        session.save(window: windowController?.window)
+    }
+
+    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return true
     }
 
     // MARK: - Menu actions
-    // (Privacy & Security system shortcut removed — this app does not expose a direct system privacy shortcut)
-
 
     @objc func showAboutPanel(_ sender: Any?) {
         var options: [NSApplication.AboutPanelOptionKey: Any] = [
-            .applicationName: "Vaaka",
-            .applicationVersion: appVersion,
-            .version: appBuild,
+            .applicationName: AppVersion.name,
+            .applicationVersion: AppVersion.version,
+            .version: AppVersion.build,
         ]
-        // Bundle.module finds the SwiftPM resource bundle in dev; Bundle.main works in the packaged .app
         let iconURL = Bundle.module.url(forResource: "AppIcon", withExtension: "icns")
             ?? Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
         if let url = iconURL, let icon = NSImage(contentsOf: url) {
@@ -115,50 +64,56 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             preferencesWindowController = PreferencesWindowController()
         }
         preferencesWindowController?.showWindow(self)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
     }
 
-    private var preferencesWindowController: PreferencesWindowController?
-
+    // MARK: - Menu construction
 
     private func createMainMenu() {
         let mainMenu = NSMenu()
+        mainMenu.addItem(makeAppMenuItem())
+        mainMenu.addItem(makeFileMenuItem())
+        mainMenu.addItem(makeEditMenuItem())
+        mainMenu.addItem(makeWindowMenuItem())
+        mainMenu.addItem(makeHelpMenuItem())
+        NSApp.mainMenu = mainMenu
+    }
 
-        // App menu
-        let appMenuItem = NSMenuItem()
-        mainMenu.addItem(appMenuItem)
-        let appMenu = NSMenu()
-        let appName = ProcessInfo.processInfo.processName
-        appMenu.addItem(withTitle: "About \(appName)", action: #selector(showAboutPanel(_:)), keyEquivalent: "")
-        appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Preferences...", action: #selector(openPreferences(_:)), keyEquivalent: ",")
-        appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Donate", action: #selector(openDonate(_:)), keyEquivalent: "")
-        appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Quit \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appMenuItem.submenu = appMenu
+    private func makeAppMenuItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu()
+        menu.addItem(withTitle: "About \(AppVersion.name)", action: #selector(showAboutPanel(_:)), keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Preferences...", action: #selector(openPreferences(_:)), keyEquivalent: ",")
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Donate", action: #selector(openDonate(_:)), keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Quit \(AppVersion.name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        item.submenu = menu
+        return item
+    }
 
-        // File menu (minimal)
-        let fileMenuItem = NSMenuItem()
-        mainMenu.addItem(fileMenuItem)
-        let fileMenu = NSMenu(title: "File")
-        fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        fileMenuItem.submenu = fileMenu
+    private func makeFileMenuItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "File")
+        menu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        item.submenu = menu
+        return item
+    }
 
-        // Edit menu
-        let editMenuItem = NSMenuItem()
-        mainMenu.addItem(editMenuItem)
-        let editMenu = NSMenu(title: "Edit")
-        // Standard edit actions forwarded to first responder
-        editMenu.addItem(withTitle: "Undo", action: NSSelectorFromString("undo:"), keyEquivalent: "z")
-        editMenu.addItem(withTitle: "Redo", action: NSSelectorFromString("redo:"), keyEquivalent: "Z")
-        editMenu.addItem(NSMenuItem.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        editMenu.addItem(NSMenuItem.separator())
-        // Spelling & Grammar submenu - actions go to first responder (NSTextView will respond)
+    private func makeEditMenuItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "Edit")
+
+        menu.addItem(withTitle: "Undo", action: NSSelectorFromString("undo:"), keyEquivalent: "z")
+        menu.addItem(withTitle: "Redo", action: NSSelectorFromString("redo:"), keyEquivalent: "Z")
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        menu.addItem(NSMenuItem.separator())
+
         let spellingItem = NSMenuItem(title: "Spelling and Grammar", action: nil, keyEquivalent: "")
         let spellingSub = NSMenu(title: "Spelling and Grammar")
         spellingSub.addItem(NSMenuItem(title: "Show Spelling and Grammar…", action: NSSelectorFromString("showGuessPanel:"), keyEquivalent: ""))
@@ -166,56 +121,52 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         spellingSub.addItem(NSMenuItem.separator())
         spellingSub.addItem(NSMenuItem(title: "Check Spelling While Typing", action: NSSelectorFromString("toggleContinuousSpellChecking:"), keyEquivalent: ""))
         spellingItem.submenu = spellingSub
-        editMenu.addItem(spellingItem)
-        editMenu.addItem(NSMenuItem.separator())
+        menu.addItem(spellingItem)
+        menu.addItem(NSMenuItem.separator())
+
         let findItem = NSMenuItem(title: "Find in Page…", action: #selector(BrowserWindowController.performFind(_:)), keyEquivalent: "f")
         findItem.keyEquivalentModifierMask = [.command]
-        editMenu.addItem(findItem)
-        // Find next (Cmd-G)
+        menu.addItem(findItem)
+
         let findNextItem = NSMenuItem(title: "Find Next", action: #selector(BrowserWindowController.performFindNextAction(_:)), keyEquivalent: "g")
         findNextItem.keyEquivalentModifierMask = [.command]
-        editMenu.addItem(findNextItem)
-        // Find previous (Shift-Cmd-G)
+        menu.addItem(findNextItem)
+
         let findPrevItem = NSMenuItem(title: "Find Previous", action: #selector(BrowserWindowController.performFindPreviousAction(_:)), keyEquivalent: "g")
         findPrevItem.keyEquivalentModifierMask = [.command, .shift]
-        editMenu.addItem(findPrevItem)
-        editMenuItem.submenu = editMenu
+        menu.addItem(findPrevItem)
 
-        // Window menu
-        let windowMenuItem = NSMenuItem()
-        mainMenu.addItem(windowMenuItem)
-        let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
-        // Tab Overview
-        let tabOverviewItem = NSMenuItem(title: "Tab Overview", action: #selector(BrowserWindowController.tabOverviewClicked(_:)), keyEquivalent: "t")
-        tabOverviewItem.keyEquivalentModifierMask = [.command]
-        windowMenu.addItem(tabOverviewItem)
-
-        // Add Command+1..9 menu items to provide standard, non-beeping tab shortcuts
-        windowMenu.addItem(NSMenuItem.separator())
-        for i in 1...9 {
-            let item = NSMenuItem(title: "Select Tab \(i)", action: #selector(BrowserWindowController.selectTabMenuItem(_:)), keyEquivalent: "\(i)")
-            item.keyEquivalentModifierMask = [.command]
-            item.tag = i - 1
-            windowMenu.addItem(item)
-        }
-
-        windowMenuItem.submenu = windowMenu
-
-        // Help menu
-        let helpMenuItem = NSMenuItem()
-        mainMenu.addItem(helpMenuItem)
-        let helpMenu = NSMenu(title: "Help")
-        helpMenu.addItem(withTitle: "Vaaka Help & Feedback…", action: #selector(openHelp(_:)), keyEquivalent: "?")
-        helpMenuItem.submenu = helpMenu
-
-        NSApp.mainMenu = mainMenu
+        item.submenu = menu
+        return item
     }
 
-    
+    private func makeWindowMenuItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "Window")
+        menu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        menu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
 
-    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
+        let tabOverviewItem = NSMenuItem(title: "Tab Overview", action: #selector(BrowserWindowController.tabOverviewClicked(_:)), keyEquivalent: "t")
+        tabOverviewItem.keyEquivalentModifierMask = [.command]
+        menu.addItem(tabOverviewItem)
+
+        menu.addItem(NSMenuItem.separator())
+        for i in 1...9 {
+            let tabItem = NSMenuItem(title: "Select Tab \(i)", action: #selector(BrowserWindowController.selectTabMenuItem(_:)), keyEquivalent: "\(i)")
+            tabItem.keyEquivalentModifierMask = [.command]
+            tabItem.tag = i - 1
+            menu.addItem(tabItem)
+        }
+
+        item.submenu = menu
+        return item
+    }
+
+    private func makeHelpMenuItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "Help")
+        menu.addItem(withTitle: "Vaaka Help & Feedback…", action: #selector(openHelp(_:)), keyEquivalent: "")
+        item.submenu = menu
+        return item
     }
 }
