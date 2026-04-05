@@ -123,7 +123,7 @@ class FindBarView: NSView {
         ])
 
         // Observe appearance changes and apply initial appearance
-        NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: .AppearanceChanged, object: nil)
         updateAppearance()
     }
 

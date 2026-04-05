@@ -1,6 +1,10 @@
 import Foundation
 import AppKit
 
+extension Notification.Name {
+    static let AppearanceChanged = Notification.Name("Vaaka.AppearanceChanged")
+}
+
 /// Manages appearance preferences: dark mode and theme-color support.
 final class AppearanceManager {
     static let shared = AppearanceManager()
@@ -20,7 +24,7 @@ final class AppearanceManager {
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: darkModeKey)
-            NotificationCenter.default.post(name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
+            NotificationCenter.default.post(name: .AppearanceChanged, object: nil)
         }
     }
 

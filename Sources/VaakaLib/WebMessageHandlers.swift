@@ -1,6 +1,11 @@
 import Foundation
 import WebKit
 
+extension Notification.Name {
+    static let ContextMenuImage = Notification.Name("Vaaka.ContextMenuImage")
+    static let ContextMenuPage = Notification.Name("Vaaka.ContextMenuPage")
+}
+
 
 /// Weak wrapper for notification message handling
 final class NotificationMessageHandler: NSObject, WKScriptMessageHandler {
@@ -159,10 +164,10 @@ final class ContextMenuHandler: NSObject, WKScriptMessageHandler {
 
         if type == "image", let src = body["src"] as? String {
             // Post notification so BrowserWindowController can present the menu at the proper location
-            NotificationCenter.default.post(name: Notification.Name("Vaaka.ContextMenuImage"), object: nil, userInfo: ["siteId": tab.site.id, "src": src])
+            NotificationCenter.default.post(name: .ContextMenuImage, object: nil, userInfo: ["siteId": tab.site.id, "src": src])
         } else if type == "page" {
             // Post notification for page context menu (back/forward navigation)
-            NotificationCenter.default.post(name: Notification.Name("Vaaka.ContextMenuPage"), object: nil, userInfo: ["siteId": tab.site.id])
+            NotificationCenter.default.post(name: .ContextMenuPage, object: nil, userInfo: ["siteId": tab.site.id])
         }
     }
 }

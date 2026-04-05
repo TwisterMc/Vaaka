@@ -7,6 +7,8 @@ extension Notification.Name {
     static let ActiveTabChanged = Notification.Name("Vaaka.ActiveTabChanged")
     // Emitted when a navigation fails with error. userInfo may contain: "siteId" (String), "url" (String), "errorDomain" (String), "errorCode" (Int), "errorDescription" (String)
     static let SiteTabDidFailLoading = Notification.Name("Vaaka.SiteTabDidFailLoading")
+    static let SiteTabDidStartLoading = Notification.Name("Vaaka.SiteTabDidStartLoading")
+    static let SiteTabDidFinishLoading = Notification.Name("Vaaka.SiteTabDidFinishLoading")
 }
 
 /// Manages the 1:1 Site -> SiteTab relationship and ensures all SiteTabs exist at launch
@@ -258,11 +260,11 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
 
     // Notify BrowserWindow about start/finish to allow UI updates (loading indicators)
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: site.id)
+        NotificationCenter.default.post(name: .SiteTabDidStartLoading, object: site.id)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
+        NotificationCenter.default.post(name: .SiteTabDidFinishLoading, object: site.id)
         if let u = webView.url, let host = u.host, SiteManager.hostMatches(host: host, siteHost: site.url.host) {
             UserDefaults.standard.set(u.absoluteString, forKey: "Vaaka.LastURL.\(site.id)")
         }
@@ -271,7 +273,7 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let nsErr = error as NSError
         // Always signal finish so UI stops spinners
-        NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
+        NotificationCenter.default.post(name: .SiteTabDidFinishLoading, object: site.id)
         // Suppress expected errors caused by downloads
         if SiteTabManager.shared.isExpectedInterruption(siteId: site.id) {
             Logger.shared.debug("[DEBUG] Ignoring expected provisional navigation interruption for site: \(site.name) code=\(nsErr.code) domain=\(nsErr.domain)")
@@ -289,7 +291,7 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         let nsErr = error as NSError
         // Always signal finish so UI stops spinners
-        NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
+        NotificationCenter.default.post(name: .SiteTabDidFinishLoading, object: site.id)
         // Suppress expected errors caused by downloads
         if SiteTabManager.shared.isExpectedInterruption(siteId: site.id) {
             Logger.shared.debug("[DEBUG] Ignoring expected navigation interruption for site: \(site.name) code=\(nsErr.code) domain=\(nsErr.domain)")

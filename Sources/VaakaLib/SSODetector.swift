@@ -12,8 +12,7 @@ struct SSODetector {
         "identity.azure.com",
         "atlassian.com",
         "id.atlassian.com",
-        "auth.atlassian.com",
-        "sso.mycompany.com" // example placeholder
+        "auth.atlassian.com"
     ]
 
     private static let knownIdPHostSuffixes: [String] = [

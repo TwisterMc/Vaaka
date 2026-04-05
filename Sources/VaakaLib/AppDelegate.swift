@@ -42,35 +42,38 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
-    private func saveSession() {
-        guard let wc = windowController else { return }
-        var session: [String: Any] = [:]
-        // window frame
-        if let w = wc.window {
-            session["frame"] = NSStringFromRect(w.frame)
-        }
+    private struct SessionData: Codable {
+        var frameX: Double
+        var frameY: Double
+        var frameWidth: Double
+        var frameHeight: Double
+    }
 
-        if let file = sessionFileURL() {
-            if let data = try? JSONSerialization.data(withJSONObject: session, options: [.prettyPrinted]) {
-                try? data.write(to: file)
+    private func saveSession() {
+        guard let wc = windowController, let frame = wc.window?.frame else { return }
+        let session = SessionData(frameX: frame.origin.x, frameY: frame.origin.y,
+                                  frameWidth: frame.size.width, frameHeight: frame.size.height)
+        guard let file = sessionFileURL() else { return }
+        DispatchQueue.global(qos: .utility).async {
+            if let data = try? JSONEncoder().encode(session) {
+                try? data.write(to: file, options: .atomic)
             }
         }
     }
 
     private func restoreSession() {
-        guard let wc = windowController else { return }
-        guard let file = sessionFileURL(), FileManager.default.fileExists(atPath: file.path) else { return }
-        guard let data = try? Data(contentsOf: file), let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        guard let wc = windowController, let file = sessionFileURL() else { return }
+        guard FileManager.default.fileExists(atPath: file.path),
+              let data = try? Data(contentsOf: file),
+              let session = try? JSONDecoder().decode(SessionData.self, from: data) else { return }
 
-        if let frameStr = obj["frame"] as? String {
-            var rect = NSRectFromString(frameStr)
-            // Enforce sensible minimums so a corrupt/small saved frame can't make the window unusable
-            let minW: CGFloat = wc.window?.minSize.width ?? 800
-            let minH: CGFloat = wc.window?.minSize.height ?? 400
-            if rect.size.width < minW { rect.size.width = minW }
-            if rect.size.height < minH { rect.size.height = minH }
-            wc.window?.setFrame(rect, display: false)
-        }
+        var rect = NSRect(x: session.frameX, y: session.frameY,
+                          width: session.frameWidth, height: session.frameHeight)
+        let minW: CGFloat = wc.window?.minSize.width ?? 800
+        let minH: CGFloat = wc.window?.minSize.height ?? 400
+        if rect.size.width < minW { rect.size.width = minW }
+        if rect.size.height < minH { rect.size.height = minH }
+        wc.window?.setFrame(rect, display: false)
 
         // SiteTabManager already restores site tabs and active site
     }

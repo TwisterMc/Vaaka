@@ -31,7 +31,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     override init(window: NSWindow?) {
         super.init(window: window)
         // Observe appearance changes
-        NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: .AppearanceChanged, object: nil)
         // Observe content-blocker updates to refresh the Last Updated label
         NotificationCenter.default.addObserver(self, selector: #selector(contentBlockerDidUpdate(_:)), name: ContentBlockerManager.ContentBlockerDidUpdate, object: nil)
         // Apply appearance preference
@@ -383,7 +383,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: .AppearanceChanged, object: nil)
         NotificationCenter.default.removeObserver(self, name: ContentBlockerManager.ContentBlockerDidUpdate, object: nil)
     }
 

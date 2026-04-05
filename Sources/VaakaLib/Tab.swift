@@ -2,6 +2,10 @@ import Foundation
 import WebKit
 import AppKit
 
+extension Notification.Name {
+    static let FaviconDidUpdate = Notification.Name("Vaaka.FaviconDidUpdate")
+}
+
 /// Represents a loaded Site tab: one `WKWebView` per `Site`.
 final class SiteTab: NSObject {
     var site: Site
@@ -58,45 +62,14 @@ final class SiteTab: NSObject {
         self.webView = SiteTab.makeWebView(configuration: configuration)
         super.init()
 
-        // Use this tab's userContentController for scripts and handlers
-        let ucc = self.webView.configuration.userContentController
-
         #if DEBUG
-        // Log configuration identity for debugging
         Logger.shared.debug("[DEBUG][SiteTab] init site=\(site.name) webView=\(ObjectIdentifier(self.webView)) config=\(ObjectIdentifier(self.webView.configuration)) ucc=\(ObjectIdentifier(self.webView.configuration.userContentController)) dataStore=\(ObjectIdentifier(self.webView.configuration.websiteDataStore))")
         #endif
 
-        // Always inject badge detection (works even without simulation)
-        let badgeScript = WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
-        ucc.addUserScript(badgeScript)
-
-        // Inject console forwarder to capture JS console/error messages for debugging
-        let consoleScript = WKUserScript(source: ConsoleForwarder.script, injectionTime: .atDocumentStart, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
-        ucc.addUserScript(consoleScript)
-        let cHandler = ConsoleMessageHandler(siteTab: self)
-        self.consoleHandler = cHandler
-        ucc.add(cHandler, name: "consoleMessage")
-
-        // If a badge handler wasn't created above (simulation disabled), register a lightweight one
-        if self.badgeHandler == nil {
-            let badgeHandler = BadgeUpdateHandler(siteTab: self)
-            self.badgeHandler = badgeHandler
-            ucc.add(badgeHandler, name: "badgeUpdate")
-        }
-
-        // Add notification message handler to support the Notification interceptor script
-        let nHandler = NotificationMessageHandler(siteTab: self)
-        self.notificationHandler = nHandler
-        ucc.add(nHandler, name: "notificationRequest")
-
-        // Context menu interceptor to enable native Save Image handling
-        let ctxScript = WKUserScript(source: ContextMenuInterceptor.script, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-        ucc.addUserScript(ctxScript)
-        let ctxHandler = ContextMenuHandler(siteTab: self)
-        ucc.add(ctxHandler, name: "contextMenu")
+        installScriptsAndHandlers(into: self.webView.configuration.userContentController)
 
             // Observe start events for this site so we can cancel watchdogs
-        self.startLoadingObserver = ObserverToken(token: NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: nil, queue: .main) { [weak self] note in
+        self.startLoadingObserver = ObserverToken(token: NotificationCenter.default.addObserver(forName: .SiteTabDidStartLoading, object: nil, queue: .main) { [weak self] note in
             guard let self = self, let id = note.object as? String, id == self.site.id else { return }
             // Cancel pre-start watchdog if navigation actually started
             self.loadingWatchdogWorkItem?.cancel()
@@ -131,7 +104,7 @@ final class SiteTab: NSObject {
                                 guard let self = self else { return }
                                 if self.navigationInProgress {
                                     NSWorkspace.shared.open(self.site.url)
-                                    NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: self.site.id)
+                                    NotificationCenter.default.post(name: .SiteTabDidFinishLoading, object: self.site.id)
                                     self.navigationInProgress = false
                                 }
                             }
@@ -140,7 +113,7 @@ final class SiteTab: NSObject {
                         } else {
                             // No tab index found — open externally as a fallback
                             NSWorkspace.shared.open(self.site.url)
-                            NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: self.site.id)
+                            NotificationCenter.default.post(name: .SiteTabDidFinishLoading, object: self.site.id)
                             self.navigationInProgress = false
                         }
                     }
@@ -151,7 +124,7 @@ final class SiteTab: NSObject {
         })
 
         // Observe finish events to clear any stuck-navigation watchdogs
-        self.finishLoadingObserver = ObserverToken(token: NotificationCenter.default.addObserver(forName: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: nil, queue: .main) { [weak self] note in
+        self.finishLoadingObserver = ObserverToken(token: NotificationCenter.default.addObserver(forName: .SiteTabDidFinishLoading, object: nil, queue: .main) { [weak self] note in
             guard let self = self, let id = note.object as? String, id == self.site.id else { return }
             // Cancel any in-flight watchdogs and clear navigation state
             self.loadingWatchdogWorkItem?.cancel()
@@ -172,13 +145,12 @@ final class SiteTab: NSObject {
     deinit {
         loadingWatchdogWorkItem?.cancel()
 
-        // Unregister closure-based observers if present
+        // Unregister closure-based observers
         startLoadingObserver?.invalidate()
         startLoadingObserver = nil
         finishLoadingObserver?.invalidate()
         finishLoadingObserver = nil
 
-        NotificationCenter.default.removeObserver(self)
         // Clean up injected script message handlers if present
         let ucc = webView.configuration.userContentController
         // Remove handlers we added during init
@@ -209,6 +181,31 @@ final class SiteTab: NSObject {
         return w
     }
 
+    /// Installs user scripts and message handlers onto `ucc`. Shared between initial
+    /// setup and content-process crash recovery to avoid duplication.
+    private func installScriptsAndHandlers(into ucc: WKUserContentController) {
+        let mainFrameOnly = !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal")
+        ucc.addUserScript(WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: mainFrameOnly))
+        ucc.addUserScript(WKUserScript(source: ConsoleForwarder.script, injectionTime: .atDocumentStart, forMainFrameOnly: mainFrameOnly))
+        let cHandler = ConsoleMessageHandler(siteTab: self)
+        consoleHandler = cHandler
+        ucc.add(cHandler, name: "consoleMessage")
+
+        if badgeHandler == nil {
+            let handler = BadgeUpdateHandler(siteTab: self)
+            badgeHandler = handler
+            ucc.add(handler, name: "badgeUpdate")
+        }
+
+        let nHandler = NotificationMessageHandler(siteTab: self)
+        notificationHandler = nHandler
+        ucc.add(nHandler, name: "notificationRequest")
+
+        ucc.addUserScript(WKUserScript(source: ContextMenuInterceptor.script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        let ctxHandler = ContextMenuHandler(siteTab: self)
+        ucc.add(ctxHandler, name: "contextMenu")
+    }
+
     /// Called when the web content process terminates/crashes. Attempt a graceful in-app recovery
     /// by replacing the WKWebView with a fresh instance using the same configuration, re-adding
     /// user scripts and message handlers, and restoring the last-known URL. If recovery fails,
@@ -237,37 +234,15 @@ final class SiteTab: NSObject {
 
             let new = SiteTab.makeWebView(configuration: newConfig)
 
-            // Log replacement details for debugging
             #if DEBUG
             Logger.shared.debug("[DEBUG][SiteTab] contentProcessRecovery site=\(self.site.name) oldWebView=\(ObjectIdentifier(old)) newWebView=\(ObjectIdentifier(new)) newConfig=\(ObjectIdentifier(new.configuration)) newUCC=\(ObjectIdentifier(new.configuration.userContentController))")
             #endif
 
-            // Reinstall user scripts / handlers bound to this SiteTab
-            let ucc = new.configuration.userContentController
-            let badgeScript = WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
-            ucc.addUserScript(badgeScript)
-            let consoleScript = WKUserScript(source: ConsoleForwarder.script, injectionTime: .atDocumentStart, forMainFrameOnly: !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal"))
-            ucc.addUserScript(consoleScript)
-
-            let cHandler = ConsoleMessageHandler(siteTab: self)
-            self.consoleHandler = cHandler
-            ucc.add(cHandler, name: "consoleMessage")
-
-            if self.badgeHandler == nil {
-                let badgeHandler = BadgeUpdateHandler(siteTab: self)
-                self.badgeHandler = badgeHandler
-                ucc.add(badgeHandler, name: "badgeUpdate")
-            }
-
-            let nHandler = NotificationMessageHandler(siteTab: self)
-            self.notificationHandler = nHandler
-            ucc.add(nHandler, name: "notificationRequest")
-
-            // Reinstall context menu interceptor
-            let ctxScript = WKUserScript(source: ContextMenuInterceptor.script, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-            ucc.addUserScript(ctxScript)
-            let ctxHandler = ContextMenuHandler(siteTab: self)
-            ucc.add(ctxHandler, name: "contextMenu")
+            // Reset handler references so installScriptsAndHandlers creates fresh ones
+            self.badgeHandler = nil
+            self.consoleHandler = nil
+            self.notificationHandler = nil
+            self.installScriptsAndHandlers(into: new.configuration.userContentController)
 
             // Copy delegates so whitelist / window.open handling continues to work
             if let nav = self.navigationDelegateStored { new.navigationDelegate = nav }
@@ -307,7 +282,7 @@ final class SiteTab: NSObject {
                 if self.webView.url == nil {
                     Logger.shared.debug("[DEBUG] content process recovery failed; opening externally for site \(self.site.name)")
                     NSWorkspace.shared.open(self.site.url)
-                    NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: self.site.id)
+                    NotificationCenter.default.post(name: .SiteTabDidFinishLoading, object: self.site.id)
                 }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + stuckTimeout, execute: finalWi)
@@ -499,7 +474,7 @@ final class SiteTab: NSObject {
             if self.webView.url == nil {
                 NSWorkspace.shared.open(self.site.url)
                 // Ensure UI spinner is not left running
-                NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: self.site.id)
+                NotificationCenter.default.post(name: .SiteTabDidFinishLoading, object: self.site.id)
             }
         }
         loadingWatchdogWorkItem = wi
@@ -569,7 +544,7 @@ final class SiteTab: NSObject {
             guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let data = rep.representation(using: .png, properties: [:]) else {
                 // Still notify UI with the captured image
                 DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: Notification.Name("Vaaka.FaviconDidUpdate"), object: self.site.id, userInfo: ["image": image])
+                    NotificationCenter.default.post(name: .FaviconDidUpdate, object: self.site.id, userInfo: ["image": image])
                 }
                 return
             }
@@ -578,7 +553,7 @@ final class SiteTab: NSObject {
             if let existing = try? Data(contentsOf: targetURL), existing == data {
                 // No change — still notify so views can pick it up if needed
                 DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: Notification.Name("Vaaka.FaviconDidUpdate"), object: self.site.id, userInfo: ["image": image])
+                    NotificationCenter.default.post(name: .FaviconDidUpdate, object: self.site.id, userInfo: ["image": image])
                 }
                 return
             }
@@ -586,12 +561,12 @@ final class SiteTab: NSObject {
             // Save and notify (saveImage will post .FaviconSaved too)
             if let _ = FaviconFetcher.shared.saveImage(image, forSiteID: self.site.id) {
                 DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: Notification.Name("Vaaka.FaviconDidUpdate"), object: self.site.id, userInfo: ["image": image])
+                    NotificationCenter.default.post(name: .FaviconDidUpdate, object: self.site.id, userInfo: ["image": image])
                 }
             } else {
                 // If save failed, still notify UI with the in-memory image
                 DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: Notification.Name("Vaaka.FaviconDidUpdate"), object: self.site.id, userInfo: ["image": image])
+                    NotificationCenter.default.post(name: .FaviconDidUpdate, object: self.site.id, userInfo: ["image": image])
                 }
             }
         }
