@@ -110,17 +110,12 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     /// Send a notification using UserNotifications framework
     func sendNotification(title: String, body: String, siteId: String, jsNotificationId: String? = nil) {
-        // Check if notifications are globally enabled (opt-in: default to disabled if key doesn't exist)
-        let globalEnabled = UserDefaults.standard.object(forKey: "Vaaka.NotificationsEnabledGlobal") as? Bool ?? false
-        guard globalEnabled else { print("[DEBUG] sendNotification: global notifications disabled"); return }
-
         // Check if notifications are enabled for this site (opt-in: default to disabled)
-        guard isEnabledForSite(siteId) else { print("[DEBUG] sendNotification: notifications disabled for site \(siteId)"); return }
+        guard isEnabledForSite(siteId) else { return }
 
-        // Ensure center exists - if initialization cannot complete, skip
+        // Ensure center exists - if initialization cannot complete (e.g. no bundle ID), skip silently
         ensureCenter { [weak self] in
-            guard let self = self else { print("[DEBUG] sendNotification: self nil"); return }
-            guard let center = self.center else { print("[DEBUG] sendNotification: notification center unavailable"); return }
+            guard let self = self, let center = self.center else { return }
 
             DispatchQueue.main.async {
                 let content = UNMutableNotificationContent()
@@ -151,58 +146,22 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         return defaults.object(forKey: key) as? Bool ?? false
     }
 
-    /// Enable/disable notifications for a site
+    /// Enable/disable notifications for a site. Requests system permission when enabling;
+    /// reverts the stored preference if permission is denied.
     func setEnabled(_ enabled: Bool, forSite siteId: String) {
         let defaults = UserDefaults.standard
         let key = "Vaaka.NotificationsEnabled.\(siteId)"
         defaults.set(enabled, forKey: key)
 
-        // If enabling, ensure we have system permission; if not, revert the setting.
-        // When running without a bundle identifier (e.g., via `swift run`/tests), we cannot request system permission — in that case persist the pref but do not attempt to request.
-        if enabled {
-            if Bundle.main.bundleIdentifier == nil {
-                print("[WARN] No bundle identifier; saved per-site notification preference but cannot request system permission in this environment")
-                return
-            }
-            requestPermission { granted in
-                if !granted {
-                    DispatchQueue.main.async {
-                        defaults.set(false, forKey: key)
-                    }
-                }
-            }
-        }
-    }
+        guard enabled else { return }
+        // Without a bundle ID (swift run / tests) we can't request system permission —
+        // persist the preference as-is and bail out.
+        guard Bundle.main.bundleIdentifier != nil else { return }
 
-    /// Enable/disable notifications globally (opt-in). Calls requestPermission when enabling and calls completion with result.
-    func setGlobalEnabled(_ enabled: Bool, completion: ((Bool) -> Void)? = nil) {
-        let defaults = UserDefaults.standard
-        let key = "Vaaka.NotificationsEnabledGlobal"
-
-        if enabled {
-            // If running without a bundle ID (development), persist pref but cannot request system permission here
-            if Bundle.main.bundleIdentifier == nil {
-                defaults.set(true, forKey: key)
-                print("[WARN] No bundle identifier; saved global notification preference but cannot request system permission in this environment")
-                completion?(true)
-                return
+        requestPermission { granted in
+            if !granted {
+                DispatchQueue.main.async { defaults.set(false, forKey: key) }
             }
-
-            // Request permission; persist only if granted
-            requestPermission { granted in
-                DispatchQueue.main.async {
-                    if granted {
-                        defaults.set(true, forKey: key)
-                    } else {
-                        defaults.set(false, forKey: key)
-                    }
-                    completion?(granted)
-                }
-            }
-        } else {
-            // Disabling is immediate
-            defaults.set(false, forKey: key)
-            completion?(true)
         }
     }
 

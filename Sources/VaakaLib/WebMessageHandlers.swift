@@ -37,10 +37,9 @@ final class NotificationMessageHandler: NSObject, WKScriptMessageHandler {
             let title = body["title"] as? String ?? ""
             let notificationBody = body["body"] as? String ?? ""
             let jsId = body["id"] as? String
-            // Deduping is handled on native side; increment unread if tab not active
             let isActive = (SiteTabManager.shared.activeTab()?.site.id == tab.site.id)
             DispatchQueue.main.async {
-                if !isActive { UnreadManager.shared.increment(for: tab.site.id) }
+                if !isActive { UnreadManager.shared.incrementNotification(for: tab.site.id) }
                 NotificationManager.shared.sendNotification(title: title, body: notificationBody, siteId: tab.site.id, jsNotificationId: jsId)
             }
             return
@@ -75,7 +74,7 @@ final class BadgeUpdateHandler: NSObject, WKScriptMessageHandler {
         lastUpdateTime = now
 
         DispatchQueue.main.async {
-            UnreadManager.shared.set(count, for: tab.site.id)
+            UnreadManager.shared.setBadgeCount(count, for: tab.site.id)
         }
     }
 }

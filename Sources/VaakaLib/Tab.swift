@@ -20,9 +20,6 @@ final class SiteTab: NSObject {
     private var badgeHandler: BadgeUpdateHandler?
     private var consoleHandler: ConsoleMessageHandler?
 
-    // Deduplication tracking for notifications
-    var lastNotificationTimes: [String: Date] = [:]
-
     private var hasLoadedStartURL: Bool = false
     private var loadingWatchdogWorkItem: DispatchWorkItem?
     private var navigationStuckWorkItem: DispatchWorkItem?
@@ -168,7 +165,6 @@ final class SiteTab: NSObject {
         badgeHandler = nil
         notificationHandler = nil
         consoleHandler = nil
-        lastNotificationTimes.removeAll()
         stopFaviconRefresh()
     }
 
@@ -184,9 +180,8 @@ final class SiteTab: NSObject {
     /// Installs user scripts and message handlers onto `ucc`. Shared between initial
     /// setup and content-process crash recovery to avoid duplication.
     private func installScriptsAndHandlers(into ucc: WKUserContentController) {
-        let mainFrameOnly = !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal")
-        ucc.addUserScript(WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: mainFrameOnly))
-        ucc.addUserScript(WKUserScript(source: ConsoleForwarder.script, injectionTime: .atDocumentStart, forMainFrameOnly: mainFrameOnly))
+        ucc.addUserScript(WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        ucc.addUserScript(WKUserScript(source: ConsoleForwarder.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         ucc.addUserScript(WKUserScript(source: NotificationInterceptor.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let cHandler = ConsoleMessageHandler(siteTab: self)
         consoleHandler = cHandler

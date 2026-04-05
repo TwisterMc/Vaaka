@@ -58,10 +58,11 @@ struct BadgeDetector {
         // Poll every 5 seconds (conservative)
         setInterval(detectBadge, 5000);
         
-        // Watch title changes
-        const titleEl = document.querySelector('title');
-        if (titleEl) {
-            new MutationObserver(detectBadge).observe(titleEl, {
+        // Watch title changes by observing document.head for child/character mutations.
+        // Observing the title element directly misses SPA frameworks (React Router, etc.)
+        // that replace the <title> element wholesale — the old reference becomes detached.
+        if (document.head) {
+            new MutationObserver(detectBadge).observe(document.head, {
                 childList: true,
                 characterData: true,
                 subtree: true

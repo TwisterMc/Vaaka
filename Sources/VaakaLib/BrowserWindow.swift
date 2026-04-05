@@ -523,9 +523,10 @@ class BrowserWindowController: NSWindowController {
                 }
             }
         } else {
-            // ensure content container subviews (including empty state) are visible state
-            contentContainer.subviews.forEach { if $0.tag != 0xE11 { $0.isHidden = false } }
-            if let empty = contentContainer.viewWithTag(0xE11) { empty.removeFromSuperview() }
+            if let empty = contentContainer.subviews.first(where: { $0.identifier?.rawValue == "EmptyStateView" }) {
+                empty.removeFromSuperview()
+            }
+            contentContainer.subviews.forEach { $0.isHidden = false }
         }
     }
 
@@ -1437,10 +1438,8 @@ class TabOverviewView: NSView {
     private var selectedIndex: Int?
     private var columns: Int = 1
     private var lastLayoutSize: CGSize = .zero
+    private var keyMonitor: Any?
 
-    // Debugging aids (temporary) - gated behind DEBUG so they never log in release builds
-
-    
     init(tabs: [SiteTab], activeIndex: Int, onSelect: @escaping (Int) -> Void, dismissHandler: @escaping () -> Void) {
         self.tabs = tabs
         self.activeIndex = activeIndex
@@ -1511,9 +1510,9 @@ class TabOverviewView: NSView {
         addGestureRecognizer(click)
         
         // Keyboard support for navigation and selection
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self else { return event }
-            
+
             switch event.keyCode {
             case 53: // Escape
                 self.onDismiss()
@@ -1547,6 +1546,11 @@ class TabOverviewView: NSView {
         // Start with active tab selected
         selectedIndex = activeIndex
         updateSelection()
+    }
+
+    deinit {
+        if let km = keyMonitor { NSEvent.removeMonitor(km) }
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func viewDidMoveToWindow() {

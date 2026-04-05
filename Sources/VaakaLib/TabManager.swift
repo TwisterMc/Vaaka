@@ -107,18 +107,7 @@ final class SiteTabManager: NSObject {
                 continue
             }
 
-            let config = WKWebViewConfiguration()
-            let webpagePreferences = WKWebpagePreferences()
-            webpagePreferences.allowsContentJavaScript = true
-            config.defaultWebpagePreferences = webpagePreferences
-
-            let userContent = WKUserContentController()
-            userContent.add(ErrorMessageHandler(siteId: site.id), name: "vaakaError")
-            // Add tracker-blocking rules if the feature is enabled and compiled
-            ContentBlockerManager.shared.addTo(userContentController: userContent)
-            config.userContentController = userContent
-
-            // Create a SiteTab that manages its own configuration internally
+            // SiteTab creates its own WKWebViewConfiguration internally
             let tab = SiteTab(site: site)
             // Make the WebView appear like Safari to servers that vary content by UA
             tab.webView.customUserAgent = UserAgent.safari
