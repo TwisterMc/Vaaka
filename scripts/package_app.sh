@@ -41,6 +41,11 @@ else
     echo "Warning: Info.plist not found"
 fi
 
+# Copy SwiftPM resource bundles so Bundle.module works at runtime
+for bundle_path in .build/release/Vaaka_*.bundle .build/debug/Vaaka_*.bundle; do
+    [ -d "$bundle_path" ] && cp -R "$bundle_path" build/Vaaka.app/Contents/MacOS/ && echo "Copied $bundle_path"
+done
+
 # Ad-hoc sign so UNUserNotificationCenter works on macOS 14+
 codesign --force --deep --sign - build/Vaaka.app
 

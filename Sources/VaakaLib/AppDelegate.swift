@@ -88,16 +88,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
 
     @objc func showAboutPanel(_ sender: Any?) {
-        let bundle = Bundle.main
-        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
-        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
         var options: [NSApplication.AboutPanelOptionKey: Any] = [
-            .applicationName: bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? ProcessInfo.processInfo.processName,
-            .version: build,
-            .applicationVersion: version,
+            .applicationName: "Vaaka",
+            .applicationVersion: appVersion,
+            .version: appBuild,
         ]
-        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
-           let icon = NSImage(contentsOf: iconURL) {
+        // Bundle.module finds the SwiftPM resource bundle in dev; Bundle.main works in the packaged .app
+        let iconURL = Bundle.module.url(forResource: "AppIcon", withExtension: "icns")
+            ?? Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
+        if let url = iconURL, let icon = NSImage(contentsOf: url) {
             options[.applicationIcon] = icon
         }
         NSApp.orderFrontStandardAboutPanel(options: options)
