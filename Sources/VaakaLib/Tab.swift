@@ -187,6 +187,7 @@ final class SiteTab: NSObject {
         let mainFrameOnly = !UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal")
         ucc.addUserScript(WKUserScript(source: BadgeDetector.script, injectionTime: .atDocumentEnd, forMainFrameOnly: mainFrameOnly))
         ucc.addUserScript(WKUserScript(source: ConsoleForwarder.script, injectionTime: .atDocumentStart, forMainFrameOnly: mainFrameOnly))
+        ucc.addUserScript(WKUserScript(source: NotificationInterceptor.script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let cHandler = ConsoleMessageHandler(siteTab: self)
         consoleHandler = cHandler
         ucc.add(cHandler, name: "consoleMessage")
@@ -370,17 +371,13 @@ final class SiteTab: NSObject {
                              if fm.fileExists(atPath: final.path) { try fm.removeItem(at: final) }
                              try fm.moveItem(at: dest, to: final)
                              DownloadsManager.shared.complete(id: id, destination: final)
-                             NSWorkspace.shared.activateFileViewerSelecting([final])
                          } catch {
                              DownloadsManager.shared.fail(id: id, error: error)
                          }
                      } else {
                          // No staging used — download wrote directly to the final destination
                          DownloadsManager.shared.complete(id: id, destination: dest)
-                         NSWorkspace.shared.activateFileViewerSelecting([dest])
                      }
-                 } else if let fm = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
-                     NSWorkspace.shared.activateFileViewerSelecting([fm])
                  }
                 if let d = self.download {
                     self.siteTab?.unregisterDownloadHandler(for: d)

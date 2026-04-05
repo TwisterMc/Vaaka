@@ -41,4 +41,7 @@ else
     echo "Warning: Info.plist not found"
 fi
 
+# Ad-hoc sign so UNUserNotificationCenter works on macOS 14+
+codesign --force --deep --sign - build/Vaaka.app
+
 echo "✅ App packaged at build/Vaaka.app"
