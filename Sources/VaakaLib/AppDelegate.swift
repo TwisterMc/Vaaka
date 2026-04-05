@@ -87,6 +87,22 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     // (Privacy & Security system shortcut removed — this app does not expose a direct system privacy shortcut)
 
 
+    @objc func showAboutPanel(_ sender: Any?) {
+        let bundle = Bundle.main
+        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [
+            .applicationName: bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? ProcessInfo.processInfo.processName,
+            .version: build,
+            .applicationVersion: version,
+        ]
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            options[.applicationIcon] = icon
+        }
+        NSApp.orderFrontStandardAboutPanel(options: options)
+    }
+
     @objc func openHelp(_ sender: Any?) {
         if let url = URL(string: "https://github.com/TwisterMc/Vaaka") { NSWorkspace.shared.open(url) }
     }
@@ -114,7 +130,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
         let appMenu = NSMenu()
         let appName = ProcessInfo.processInfo.processName
-        appMenu.addItem(withTitle: "About \(appName)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About \(appName)", action: #selector(showAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Preferences...", action: #selector(openPreferences(_:)), keyEquivalent: ",")
         appMenu.addItem(NSMenuItem.separator())
