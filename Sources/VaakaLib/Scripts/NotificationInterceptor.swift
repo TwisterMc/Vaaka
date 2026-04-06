@@ -7,12 +7,17 @@ struct NotificationInterceptor {
         const isGmail = window.location.hostname.includes('mail.google.com');
         
         console.log('[Vaaka] Notification simulator enabled for:', window.location.hostname);
-        
+
+        // Pre-grant permission so sites (especially Slack) see 'granted' from the very first check.
+        // Without this, Slack reads Notification.permission === 'default' at startup, decides not to
+        // send notifications, and sometimes caches that decision in IndexedDB indefinitely.
+        window.nativeNotificationPermission = 'granted';
+
         // For Slack, hint desktop mode
         if (isSlack) {
             window.slackDebug = { desktop: true };
         }
-        
+
         // Store original for fallback
         const OriginalNotification = window.Notification;
         
@@ -63,16 +68,19 @@ struct NotificationInterceptor {
 
             static requestPermission(callback) {
                 console.log('[Vaaka] Notification.requestPermission() called');
-                // Store callback and return a promise that resolves when native answers
-                if (callback) window.notificationPermissionCallback = callback;
-                return new Promise(function(resolve) {
-                    window.__vaaka_permissionResolver = resolve;
-                    try {
-                        if (window.webkit && window.webkit.messageHandlers.notificationRequest) {
-                            window.webkit.messageHandlers.notificationRequest.postMessage({ type: 'permissionRequest' });
-                        }
-                    } catch(e) { resolve('denied'); }
-                });
+                // Resolve immediately with 'granted' — Vaaka handles OS-level permission separately.
+                // Waiting on a native async round-trip causes Slack to time out and stop trying.
+                const status = 'granted';
+                window.nativeNotificationPermission = status;
+                if (callback) { try { callback(status); } catch(e) {} }
+                // Also kick off the native permission request in the background so the OS dialog
+                // appears if it hasn't already.
+                try {
+                    if (window.webkit && window.webkit.messageHandlers.notificationRequest) {
+                        window.webkit.messageHandlers.notificationRequest.postMessage({ type: 'permissionRequest' });
+                    }
+                } catch(e) {}
+                return Promise.resolve(status);
             }
         }
         
