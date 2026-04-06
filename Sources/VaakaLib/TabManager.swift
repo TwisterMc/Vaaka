@@ -225,18 +225,9 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
                 return decisionHandler(.allow)
             }
 
-            // If the link looks like an SSO/IdP target, keep in-app when it is explicitly whitelisted
-            // (e.g., user has accounts.google.com/atlassian.com added, or this is same-domain matching).
-            let isSSO = SSODetector.isSSO(url)
-            if isSSO {
-                if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
-                    return decisionHandler(.allow)
-                }
-                if SiteManager.shared.isWhitelisted(url: url) {
-                    return decisionHandler(.allow)
-                }
-                NSWorkspace.shared.open(url)
-                return decisionHandler(.cancel)
+            // If the link looks like an SSO/IdP target, always allow in-app so login flows complete.
+            if SSODetector.isSSO(url) {
+                return decisionHandler(.allow)
             }
 
             NSWorkspace.shared.open(url)
