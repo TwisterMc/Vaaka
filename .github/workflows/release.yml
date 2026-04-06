@@ -1,6 +1,9 @@
 name: Build & Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -76,6 +79,13 @@ jobs:
           cp Resources/Info.plist "$OUT_APP/Contents/Info.plist"
           cp -R Resources/ "$OUT_APP/Contents/Resources/"
 
+          # Stamp version from git tag (strips leading 'v')
+          GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+          if [ -n "$GIT_TAG" ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $GIT_TAG" "$OUT_APP/Contents/Info.plist"
+            echo "✓ Version stamped: $GIT_TAG"
+          fi
+
           # Copy SwiftPM resource bundle (Bundle.module)
           if [ -d "$BIN_DIR/Vaaka_Vaaka.bundle" ]; then
             cp -R "$BIN_DIR/Vaaka_Vaaka.bundle" "$OUT_APP/Contents/Resources/"
@@ -124,7 +134,9 @@ jobs:
       - name: Determine release tag
         id: tag
         run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
             echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
           else
             echo "tag=auto-${{ github.run_id }}" >> $GITHUB_OUTPUT

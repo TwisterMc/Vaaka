@@ -25,6 +25,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         windowController?.showWindow(self)
         NSApp.activate()
         windowController?.window?.makeKeyAndOrderFront(nil)
+
+        // Silently check for updates on launch — only alerts if a newer version exists.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+            UpdateChecker.shared.checkForUpdates(silentIfCurrent: true)
+        }
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
@@ -36,6 +41,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Menu actions
+
+    @objc func checkForUpdates(_ sender: Any?) {
+        UpdateChecker.shared.checkForUpdates(silentIfCurrent: false)
+    }
 
     @objc func showAboutPanel(_ sender: Any?) {
         var options: [NSApplication.AboutPanelOptionKey: Any] = [
@@ -83,6 +92,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSMenuItem()
         let menu = NSMenu()
         menu.addItem(withTitle: "About \(AppVersion.name)", action: #selector(showAboutPanel(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Preferences...", action: #selector(openPreferences(_:)), keyEquivalent: ",")
         menu.addItem(NSMenuItem.separator())

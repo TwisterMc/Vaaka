@@ -41,6 +41,15 @@ else
     echo "Warning: Info.plist not found"
 fi
 
+# Stamp version from the nearest git tag (e.g. "v0.3" → "0.3")
+GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+if [ -n "$GIT_TAG" ]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $GIT_TAG" build/Vaaka.app/Contents/Info.plist
+    echo "Version stamped: $GIT_TAG"
+else
+    echo "Warning: no git tag found, Info.plist version unchanged"
+fi
+
 # Copy SwiftPM resource bundles so Bundle.module works at runtime
 for bundle_path in .build/release/Vaaka_*.bundle .build/debug/Vaaka_*.bundle; do
     [ -d "$bundle_path" ] && cp -R "$bundle_path" build/Vaaka.app/Contents/MacOS/ && echo "Copied $bundle_path"
