@@ -185,15 +185,11 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
             Logger.shared.debug("[NAV] backForward navigation - ALWAYS ALLOWED")
             return decisionHandler(.allow)
         }
-        
-        // Allow in-page navigation and navigations that remain within the owning site's domain (subdomains allowed).
-        // Use hostMatches directly to avoid relying on Site (value) equality which may be brittle across reloads.
-        if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
-            Logger.shared.debug("[NAV] Same domain - ALLOWED")
-            return decisionHandler(.allow)
-        }
 
-        // If this navigation is the result of a user clicking a link, determine policy (external for SSO IdPs or external links)
+        // If this navigation is the result of a user clicking a link, determine policy (external for SSO IdPs or external links).
+        // This must run BEFORE the same-domain check below, because redirect wrapper URLs like
+        // https://www.google.com/url?q=<external> share the root domain with mail.google.com and
+        // would otherwise be allowed in-app without being unwrapped.
         if navigationAction.navigationType == .linkActivated {
             let abs = url.absoluteString
             if let sch = url.scheme?.lowercased(), sch == "data" || sch == "blob" || sch == "about" || abs.hasPrefix("about:") {
@@ -232,6 +228,14 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
 
             NSWorkspace.shared.open(url)
             return decisionHandler(.cancel)
+        }
+
+        // Allow navigations that remain within the owning site's domain (subdomains allowed).
+        // This is intentionally after the linkActivated block so that redirect wrapper URLs
+        // (e.g. www.google.com/url?q=…) are unwrapped before the domain check can approve them.
+        if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
+            Logger.shared.debug("[NAV] Same domain - ALLOWED")
+            return decisionHandler(.allow)
         }
 
         // For non-user-initiated navigations (e.g., redirects, script-driven), allow them — resources from other domains are permitted.
