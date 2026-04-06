@@ -509,8 +509,11 @@ final class SiteTab: NSObject {
         // Avoid starting multiple timers
         if faviconRefreshTimer != nil { return }
 
-        // Fire immediately with a scheduled reschedule for the next interval (midnight-friendly)
-        refreshDynamicFavicon()
+        // Delay the initial capture slightly so the page's JS has time to render the dynamic favicon
+        // (e.g. Google Calendar writes a canvas-based date icon after load completes).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            self?.refreshDynamicFavicon()
+        }
 
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
         timer.schedule(deadline: .now() + interval, leeway: .seconds(30))
