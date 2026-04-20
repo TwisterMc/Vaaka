@@ -31,7 +31,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     override init(window: NSWindow?) {
         super.init(window: window)
         // Observe appearance changes
-        NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: .AppearanceChanged, object: nil)
         // Observe content-blocker updates to refresh the Last Updated label
         NotificationCenter.default.addObserver(self, selector: #selector(contentBlockerDidUpdate(_:)), name: ContentBlockerManager.ContentBlockerDidUpdate, object: nil)
         // Apply appearance preference
@@ -263,15 +263,6 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         darkModeRow.alignment = .centerY
         darkModeLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        // Notifications
-        let enableNotifications = NSButton(checkboxWithTitle: "Enable website notifications", target: self, action: #selector(toggleNotifications(_:)))
-        enableNotifications.state = UserDefaults.standard.bool(forKey: "Vaaka.NotificationsEnabledGlobal") ? .on : .off
-        enableNotifications.toolTip = "Allow websites to send system notifications"
-
-        // Dev-mode controls (notification simulation removed from UI; simulation still occurs for unbundled builds)
-        // (Inject-scripts option removed from UI; injection now follows Notifications enabled state)
-
-
         // Favicon refresh button (moved to Dev pane)
         let refreshFaviconsButton = NSButton(title: "Refresh Favicons", target: self, action: #selector(refreshFavicons))
         refreshFaviconsButton.bezelStyle = .rounded
@@ -281,8 +272,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         showLogsButton.bezelStyle = .rounded
         showLogsButton.toolTip = "Open the developer logs (tail of ~/Library/Logs/Vaaka.log)"
 
-        // General stack (no longer contains the Dev-only controls)
-        let generalStack = NSStackView(views: [generalHeader, darkModeRow, enableNotifications])
+        let generalStack = NSStackView(views: [generalHeader, darkModeRow])
         generalStack.orientation = .vertical
         generalStack.alignment = .leading
         generalStack.spacing = 10
@@ -383,7 +373,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: .AppearanceChanged, object: nil)
         NotificationCenter.default.removeObserver(self, name: ContentBlockerManager.ContentBlockerDidUpdate, object: nil)
     }
 
@@ -433,29 +423,6 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         UserDefaults.standard.set(on, forKey: "Vaaka.SendDNT")
     }
 
-    @objc private func toggleNotifications(_ sender: NSButton) {
-        let on = sender.state == .on
-        Logger.shared.debug("[DEBUG] Preferences.toggleNotifications: user toggled to \(on ? "on" : "off")")
-        // Use NotificationManager to handle permission flow and prefs
-        if on {
-            NotificationManager.shared.setGlobalEnabled(true) { granted in
-                Logger.shared.debug("[DEBUG] Preferences.toggleNotifications: setGlobalEnabled completion granted=\(granted)")
-                DispatchQueue.main.async {
-                    if granted {
-                        sender.state = .on
-                    } else {
-                        sender.state = .off
-                    }
-                }
-            }
-        } else {
-            NotificationManager.shared.setGlobalEnabled(false) { success in
-                Logger.shared.debug("[DEBUG] Preferences.toggleNotifications: setGlobalEnabled disabled success=\(success)")
-                DispatchQueue.main.async { sender.state = .off }
-            }
-        }
-    }
-
     @objc private func toggleSiteNotification(_ sender: NSButton) {
         let row = sender.tag
         guard row >= 0, row < SiteManager.shared.sites.count else { return }
@@ -481,8 +448,7 @@ class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NS
         }
     }
 
-    // Notification simulation toggle removed from preferences UI.
-    // full-frame script injection toggle removed — injection is now automatic when website notifications are enabled.
+
 
 
 

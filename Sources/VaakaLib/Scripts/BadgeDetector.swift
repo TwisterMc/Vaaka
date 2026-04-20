@@ -18,13 +18,17 @@ struct BadgeDetector {
                 count = parseInt(titleMatch[titleMatch.length - 1]);
             }
             
-            // Priority 2: Site-specific DOM fallbacks (only if title failed)
+            // Priority 2: Gmail DOM fallback — only use the nav item if it explicitly signals unread
+            // (aria-label contains "unread"). Avoid grabbing total message counts.
             if (count === 0 && isGmail) {
                 try {
                     const inboxNav = document.querySelector('[role="navigation"] [title*="Inbox"]');
                     if (inboxNav) {
-                        const match = inboxNav.textContent.match(/\\d+/);
-                        if (match) count = parseInt(match[0]);
+                        const label = (inboxNav.getAttribute('aria-label') || '').toLowerCase();
+                        if (label.includes('unread')) {
+                            const match = label.match(/\\d+/);
+                            if (match) count = parseInt(match[0]);
+                        }
                     }
                 } catch (e) {
                     console.log('[Vaaka] Gmail badge detection error:', e);
@@ -58,10 +62,11 @@ struct BadgeDetector {
         // Poll every 5 seconds (conservative)
         setInterval(detectBadge, 5000);
         
-        // Watch title changes
-        const titleEl = document.querySelector('title');
-        if (titleEl) {
-            new MutationObserver(detectBadge).observe(titleEl, {
+        // Watch title changes by observing document.head for child/character mutations.
+        // Observing the title element directly misses SPA frameworks (React Router, etc.)
+        // that replace the <title> element wholesale — the old reference becomes detached.
+        if (document.head) {
+            new MutationObserver(detectBadge).observe(document.head, {
                 childList: true,
                 characterData: true,
                 subtree: true

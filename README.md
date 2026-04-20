@@ -53,6 +53,21 @@ It's not signed because I haven't paid Apple the fee for a developer account at 
 - macOS 14.0 or later
 - Apple Silicon or Intel
 
+## Releasing a New Version
+
+1. Update `Resources/Info.plist` — bump `CFBundleShortVersionString` to match the new version (e.g. `0.3`).
+2. Commit the change: `git commit -am "Bump version to 0.3"`
+3. Push a tag: `git tag v0.3 && git push --tags`
+
+That's it. GitHub Actions will automatically:
+- Build for both Apple Silicon and Intel
+- Stamp the version from the tag into the app bundle
+- Create a draft pre-release at [Releases](https://github.com/TwisterMc/Vaaka/releases) with both `.zip` files attached
+
+Review the draft, edit the release notes, then publish it. The app's built-in update checker reads the tag from GitHub Releases, so users will be notified automatically on next launch.
+
+> The workflow can also be triggered manually from the **Actions** tab if you need to build without tagging.
+
 ## Donate
 
 If you find Vaaka useful and would like to support its development, consider [making a donation](https://ko-fi.com/twistermc).

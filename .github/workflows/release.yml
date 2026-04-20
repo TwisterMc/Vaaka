@@ -1,6 +1,9 @@
 name: Build & Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -24,7 +27,7 @@ jobs:
           - arch: x86_64
             os: macos-15-intel
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Check runner architecture
         id: check
@@ -38,7 +41,7 @@ jobs:
 
       - name: Cache Swift build artifacts
         if: steps.check.outputs.skipping == 'false'
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.3
         with:
           path: |
             .build
@@ -48,7 +51,7 @@ jobs:
 
       - name: Install Swift
         if: steps.check.outputs.skipping == 'false'
-        uses: swift-actions/setup-swift@v2
+        uses: swift-actions/setup-swift@v2.3.0
         with:
           swift-version: "6.1"
 
@@ -75,6 +78,13 @@ jobs:
           # Copy Info.plist and resources
           cp Resources/Info.plist "$OUT_APP/Contents/Info.plist"
           cp -R Resources/ "$OUT_APP/Contents/Resources/"
+
+          # Stamp version from git tag (strips leading 'v')
+          GIT_TAG=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+          if [ -n "$GIT_TAG" ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $GIT_TAG" "$OUT_APP/Contents/Info.plist"
+            echo "✓ Version stamped: $GIT_TAG"
+          fi
 
           # Copy SwiftPM resource bundle (Bundle.module)
           if [ -d "$BIN_DIR/Vaaka_Vaaka.bundle" ]; then
@@ -104,7 +114,7 @@ jobs:
 
       - name: Upload artifact
         if: steps.check.outputs.skipping == 'false'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: Vaaka-${{ matrix.arch }}
           path: ./artifacts/Vaaka-${{ matrix.arch }}.zip
@@ -114,24 +124,26 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.3.0
         with:
           path: ./artifacts
 
       - name: Determine release tag
         id: tag
         run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
             echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
           else
             echo "tag=auto-${{ github.run_id }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Create Draft Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2.3.2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: "Vaaka ${{ steps.tag.outputs.tag }}"

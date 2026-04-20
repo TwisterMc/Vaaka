@@ -224,7 +224,6 @@ extension DownloadsManager: URLSessionDownloadDelegate {
                 final = candidate
             }
             complete(id: id, destination: final)
-            DispatchQueue.main.async { NSWorkspace.shared.activateFileViewerSelecting([final]) }
         } catch {
             fail(id: id, error: error)
         }

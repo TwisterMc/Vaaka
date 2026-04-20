@@ -48,8 +48,8 @@ class BrowserWindowController: NSWindowController {
         NotificationCenter.default.addObserver(self, selector: #selector(activeTabChanged), name: .ActiveTabChanged, object: nil)
 
         // Observe loading notifications for showing spinner states
-        NotificationCenter.default.addObserver(self, selector: #selector(siteDidStartLoading(_:)), name: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(siteDidFinishLoading(_:)), name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(siteDidStartLoading(_:)), name: .SiteTabDidStartLoading, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(siteDidFinishLoading(_:)), name: .SiteTabDidFinishLoading, object: nil)
         // Present user-friendly failures when navigation fails
         NotificationCenter.default.addObserver(self, selector: #selector(siteDidFailLoading(_:)), name: .SiteTabDidFailLoading, object: nil)
 
@@ -57,17 +57,16 @@ class BrowserWindowController: NSWindowController {
         NotificationCenter.default.addObserver(self, selector: #selector(sitesChanged), name: .SitesChanged, object: nil)
 
         // Observe appearance changes
-        NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: NSNotification.Name("Vaaka.AppearanceChanged"), object: nil)
-            NotificationCenter.default.addObserver(self, selector: #selector(faviconSaved(_:)), name: .FaviconSaved, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appearanceChanged), name: .AppearanceChanged, object: nil)
         // Window delegate
         self.window?.delegate = self
 
         // Observe image-contextmenu messages from webviews to show native Save menu
-        NotificationCenter.default.addObserver(self, selector: #selector(imageContextMenuRequested(_:)), name: Notification.Name("Vaaka.ContextMenuImage"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(imageContextMenuRequested(_:)), name: .ContextMenuImage, object: nil)
 
         // Observe downloads model updates
-        NotificationCenter.default.addObserver(self, selector: #selector(downloadsChanged(_:)), name: Notification.Name("Vaaka.DownloadsChanged"), object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(downloadUpdated(_:)), name: Notification.Name("Vaaka.DownloadUpdated"), object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(downloadsChanged(_:)), name: .DownloadsChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(downloadUpdated(_:)), name: .DownloadUpdated, object: nil)
 
         // Keyboard shortcuts
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] evt in
@@ -259,6 +258,8 @@ class BrowserWindowController: NSWindowController {
         currentFindIndex = 0
         totalFindMatches = 0
         findBar?.updateMatchCount(current: 0, total: 0)
+        // Return keyboard focus to the active WebView so the user can keep browsing
+        window?.makeFirstResponder(SiteTabManager.shared.activeTab()?.webView)
     }
 
     private func performWebViewFind(text: String) {
@@ -271,51 +272,55 @@ class BrowserWindowController: NSWindowController {
             findBar?.updateMatchCount(current: 0, total: 0)
             return
         }
-        let escaped = text
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            let js = #"""
-            (function(){
-                var q = '\#(escaped)';
+        let config = WKFindConfiguration()
+        config.caseSensitive = false
+        config.wraps = true
+        config.backwards = false
+        wv.find(text, configuration: config) { [weak self] result in
+            guard let self = self else { return }
+            self.countMatches(in: wv, for: text, found: result.matchFound)
+        }
+    }
+
+    /// Count total occurrences of `text` using JSON-encoded string to avoid JS injection.
+    private func countMatches(in wv: WKWebView, for text: String, found: Bool) {
+        guard let encodedData = try? JSONSerialization.data(withJSONObject: text),
+              let jsonString = String(data: encodedData, encoding: .utf8) else {
+            let fallback = found ? 1 : 0
+            totalFindMatches = fallback
+            currentFindIndex = fallback
+            findBar?.updateMatchCount(current: fallback, total: fallback)
+            return
+        }
+        let js = """
+        (function(){
+            var q = \(jsonString);
             var body = document.body && document.body.innerText ? document.body.innerText : '';
-            var esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            var esc = q.replace(/[.*+?^${}()|[\\\\]\\\\]/g, '\\\\$&');
             var re = new RegExp(esc, 'gi');
             var count = 0; while(re.exec(body)) { count++; }
-            // reset scroll/selection near top so first find goes from start
-            try { document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch(e){}
-            try { var sel = window.getSelection(); if (sel) { sel.removeAllRanges(); } } catch(e){}
-            var found = false;
-            try { found = window.find(q, false, false, true, false, false, false); } catch(e){}
-            return {found: found, total: count};
+            return count;
         })();
-        """#
-        wv.evaluateJavaScript(js) { [weak self] result, error in
+        """
+        wv.evaluateJavaScript(js) { [weak self] result, _ in
             guard let self = self else { return }
-            if error != nil {
-                self.findBar?.updateMatchCount(current: 0, total: 0)
-                return
-            }
-            if let dict = result as? [String: Any], let total = dict["total"] as? Int, let found = dict["found"] as? Bool {
-                self.totalFindMatches = total
-                self.currentFindIndex = found && total > 0 ? 1 : 0
-                self.findBar?.updateMatchCount(current: self.currentFindIndex, total: total)
-            } else {
-                self.findBar?.updateMatchCount(current: 0, total: 0)
-            }
+            let total = (result as? Int) ?? (found ? 1 : 0)
+            self.totalFindMatches = total
+            self.currentFindIndex = found && total > 0 ? 1 : 0
+            self.findBar?.updateMatchCount(current: self.currentFindIndex, total: total)
         }
     }
 
     private func performFindNext() {
         guard !currentSearchText.isEmpty, let wv = SiteTabManager.shared.activeTab()?.webView else { return }
-        let escaped = currentSearchText
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            let js = #"(function(){ try { return window.find('\#(escaped)', false, false, true, false, false, false); } catch(e){ return false; } })();"#
-        wv.evaluateJavaScript(js) { [weak self] result, _ in
+        let config = WKFindConfiguration()
+        config.caseSensitive = false
+        config.wraps = true
+        config.backwards = false
+        wv.find(currentSearchText, configuration: config) { [weak self] result in
             guard let self = self else { return }
-            let found = (result as? Bool) ?? false
             if self.totalFindMatches > 0 {
-                self.currentFindIndex = found ? ((self.currentFindIndex % self.totalFindMatches) + 1) : 0
+                self.currentFindIndex = result.matchFound ? ((self.currentFindIndex % self.totalFindMatches) + 1) : 0
             } else {
                 self.currentFindIndex = 0
             }
@@ -325,15 +330,14 @@ class BrowserWindowController: NSWindowController {
 
     private func performFindPrevious() {
         guard !currentSearchText.isEmpty, let wv = SiteTabManager.shared.activeTab()?.webView else { return }
-        let escaped = currentSearchText
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            let js = #"(function(){ try { return window.find('\#(escaped)', false, true, true, false, false, false); } catch(e){ return false; } })();"#
-        wv.evaluateJavaScript(js) { [weak self] result, _ in
+        let config = WKFindConfiguration()
+        config.caseSensitive = false
+        config.wraps = true
+        config.backwards = true
+        wv.find(currentSearchText, configuration: config) { [weak self] result in
             guard let self = self else { return }
-            let found = (result as? Bool) ?? false
             if self.totalFindMatches > 0 {
-                self.currentFindIndex = found ? ((self.currentFindIndex - 2 + self.totalFindMatches) % self.totalFindMatches + 1) : 0
+                self.currentFindIndex = result.matchFound ? ((self.currentFindIndex - 2 + self.totalFindMatches) % self.totalFindMatches + 1) : 0
             } else {
                 self.currentFindIndex = 0
             }
@@ -343,8 +347,8 @@ class BrowserWindowController: NSWindowController {
 
     private func clearWebViewSelection() {
         guard let wv = SiteTabManager.shared.activeTab()?.webView else { return }
-        let js = "(function(){ try { var sel = window.getSelection(); if(sel){ sel.removeAllRanges(); } } catch(e){} })();"
-        wv.evaluateJavaScript(js, completionHandler: nil)
+        // Use the native API to clear the find highlight without any user-text injection
+        wv.find("", configuration: WKFindConfiguration()) { _ in }
     }
 
     // MARK: - UI updates
@@ -519,9 +523,10 @@ class BrowserWindowController: NSWindowController {
                 }
             }
         } else {
-            // ensure content container subviews (including empty state) are visible state
-            contentContainer.subviews.forEach { if $0.tag != 0xE11 { $0.isHidden = false } }
-            if let empty = contentContainer.viewWithTag(0xE11) { empty.removeFromSuperview() }
+            if let empty = contentContainer.subviews.first(where: { $0.identifier?.rawValue == "EmptyStateView" }) {
+                empty.removeFromSuperview()
+            }
+            contentContainer.subviews.forEach { $0.isHidden = false }
         }
     }
 
@@ -540,13 +545,6 @@ class BrowserWindowController: NSWindowController {
 
     @objc private func downloadUpdated(_ note: Notification) {
         updateDownloadsBar(animated: false)
-    }
-
-    @objc private func faviconSaved(_ note: Notification) {
-        // Rebuild rail to pick up new favicon resources (per-item handlers also update immediately)
-        DispatchQueue.main.async {
-            self.rebuildRailButtons()
-        }
     }
 
     private var hideDownloadsWorkItem: DispatchWorkItem?
@@ -1031,17 +1029,13 @@ class BrowserWindowController: NSWindowController {
             ])
 
             spinner.style = .spinning
-
-            // Accessibility for tab item
-            self.setAccessibilityElement(true)
-            self.setAccessibilityRole(.button)
-            self.setAccessibilityLabel("\(site.name) tab")
-            self.setAccessibilityIdentifier("RailItem.\(site.id)")
             spinner.controlSize = .small
             spinner.translatesAutoresizingMaskIntoConstraints = false
             spinner.isDisplayedWhenStopped = false
             spinner.isHidden = true
             spinner.alphaValue = 0.0
+            // Loading state is announced via NSAccessibility.post announcementRequested; hide the visual spinner
+            spinner.setAccessibilityHidden(true)
             imageView.alphaValue = 1.0
 
             addSubview(indicator)
@@ -1079,7 +1073,8 @@ class BrowserWindowController: NSWindowController {
             // Accessibility: make this rail item an accessibility element (acts like a button)
             self.setAccessibilityElement(true)
             self.setAccessibilityRole(.button)
-            self.setAccessibilityLabel(site.name)
+            self.setAccessibilityIdentifier("RailItem.\(site.id)")
+            // Label is set (and kept current) by updateBadge()
 
             // set tooltip
             self.toolTip = site.name
@@ -1093,7 +1088,7 @@ class BrowserWindowController: NSWindowController {
             NotificationCenter.default.addObserver(self, selector: #selector(faviconSaved(_:)), name: .FaviconSaved, object: nil)
 
             // Listen for dynamic favicon updates specifically for this site
-            NotificationCenter.default.addObserver(self, selector: #selector(faviconDidUpdate(_:)), name: Notification.Name("Vaaka.FaviconDidUpdate"), object: site.id)
+            NotificationCenter.default.addObserver(self, selector: #selector(faviconDidUpdate(_:)), name: .FaviconDidUpdate, object: site.id)
 
             // Load favicon (SVG preferred, PNG allowed, generated fallback)
             if let name = site.favicon {
@@ -1164,9 +1159,22 @@ class BrowserWindowController: NSWindowController {
             if count > 0 {
                 badgeLabel.stringValue = count > 9 ? "9+" : "\(count)"
                 badgeContainer.isHidden = false
+                setAccessibilityLabel("\(site.name), \(count) unread")
             } else {
                 badgeContainer.isHidden = true
                 badgeLabel.stringValue = ""
+                setAccessibilityLabel(site.name)
+            }
+        }
+
+        override var acceptsFirstResponder: Bool { return true }
+
+        override func keyDown(with event: NSEvent) {
+            // Space or Return activates the tab, matching standard button behaviour
+            if event.keyCode == 49 || event.keyCode == 36 {
+                actionTarget?.railItemClicked(index)
+            } else {
+                super.keyDown(with: event)
             }
         }
 
@@ -1430,10 +1438,8 @@ class TabOverviewView: NSView {
     private var selectedIndex: Int?
     private var columns: Int = 1
     private var lastLayoutSize: CGSize = .zero
+    private var keyMonitor: Any?
 
-    // Debugging aids (temporary) - gated behind DEBUG so they never log in release builds
-
-    
     init(tabs: [SiteTab], activeIndex: Int, onSelect: @escaping (Int) -> Void, dismissHandler: @escaping () -> Void) {
         self.tabs = tabs
         self.activeIndex = activeIndex
@@ -1504,9 +1510,9 @@ class TabOverviewView: NSView {
         addGestureRecognizer(click)
         
         // Keyboard support for navigation and selection
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self else { return event }
-            
+
             switch event.keyCode {
             case 53: // Escape
                 self.onDismiss()
@@ -1540,6 +1546,11 @@ class TabOverviewView: NSView {
         // Start with active tab selected
         selectedIndex = activeIndex
         updateSelection()
+    }
+
+    deinit {
+        if let km = keyMonitor { NSEvent.removeMonitor(km) }
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func viewDidMoveToWindow() {

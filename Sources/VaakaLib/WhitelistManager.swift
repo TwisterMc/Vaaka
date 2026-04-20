@@ -55,48 +55,47 @@ final class SiteManager {
     }
 
     /// Loads sites from bundled resource `whitelist.json` if no persisted file exists, otherwise from persisted file.
-    /// This method strictly expects the new `sites` schema and will silently fail (no fallback) if the schema is invalid.
+    /// File I/O is performed on a background queue; `sites` is set on the main queue when done.
     func loadSites() {
+        let fileURL = self.fileURL // capture before background dispatch
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let loaded = self.loadSitesSync(from: fileURL)
+            DispatchQueue.main.async {
+                self.sites = loaded
+            }
+        }
+    }
+
+    private func loadSitesSync(from fileURL: URL) -> [Site] {
         let decoder = JSONDecoder()
-        // Prefer persisted file in App Support; if missing, load bundled resource and persist it (first-run behavior)
         if FileManager.default.fileExists(atPath: fileURL.path) {
-            do {
-                let data = try Data(contentsOf: fileURL)
-                let schema = try decoder.decode(FileSchema.self, from: data)
-                sites = schema.sites
-            } catch {
-                sites = []
+            if let data = try? Data(contentsOf: fileURL),
+               let schema = try? decoder.decode(FileSchema.self, from: data) {
+                return schema.sites
             }
         } else {
-            do {
-                // Prefer main bundle Resources
-                var bundledURL: URL? = Bundle.main.url(forResource: "whitelist", withExtension: "json")
-                // Fallback to SwiftPM bundle inside app Resources (without touching Bundle.module)
-                if bundledURL == nil, let base = Bundle.main.resourceURL {
-                    let candidate = base.appendingPathComponent("Vaaka_Vaaka.bundle").appendingPathComponent("whitelist.json")
-                    if FileManager.default.fileExists(atPath: candidate.path) { bundledURL = candidate }
-                }
-                guard let bundled = bundledURL else { sites = []; return }
-                let data = try Data(contentsOf: bundled)
-                let schema = try decoder.decode(FileSchema.self, from: data)
-                sites = schema.sites
-                // Persist the bundled version for future launches
+            var bundledURL: URL? = Bundle.main.url(forResource: "whitelist", withExtension: "json")
+            if bundledURL == nil, let base = Bundle.main.resourceURL {
+                let candidate = base.appendingPathComponent("Vaaka_Vaaka.bundle").appendingPathComponent("whitelist.json")
+                if FileManager.default.fileExists(atPath: candidate.path) { bundledURL = candidate }
+            }
+            if let bundled = bundledURL,
+               let data = try? Data(contentsOf: bundled),
+               let schema = try? decoder.decode(FileSchema.self, from: data) {
                 try? data.write(to: fileURL)
-            } catch {
-                sites = []
+                return schema.sites
             }
         }
 
-        if sites.isEmpty {
-            if let appleURL = URL(string: "https://www.apple.com") {
-                let s = Site(id: "apple-default", name: "Apple", url: appleURL, favicon: nil)
-                sites = [s]
-                // Persist the seeded list so users can modify it later
-                let encoder = JSONEncoder()
-                let schema = FileSchema(version: "1.0", sites: sites)
-                if let data = try? encoder.encode(schema) { try? data.write(to: fileURL) }
-            }
+        // Seed a default site so the app is usable on first launch
+        if let appleURL = URL(string: "https://www.apple.com") {
+            let s = Site(id: "apple-default", name: "Apple", url: appleURL, favicon: nil)
+            let schema = FileSchema(version: "1.0", sites: [s])
+            if let data = try? JSONEncoder().encode(schema) { try? data.write(to: fileURL) }
+            return [s]
         }
+        return []
     }
 
     /// Normalize a host for domain-based matching (strip leading 'www.' and lowercase).

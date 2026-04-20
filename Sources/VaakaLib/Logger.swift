@@ -12,6 +12,12 @@ final class Logger {
     private var buffer: [String] = []
     private let maxBuffer = 500
 
+    private let dateFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
     private init() {
         // Ensure log directory exists and touch the log file so `tail` can find it immediately
         do {
@@ -29,7 +35,9 @@ final class Logger {
             // Keep banner in the recent buffer and notify observers so open Dev Log isn't empty
             queue.async {
                 self.buffer.append(bannerLine)
-                NotificationCenter.default.post(name: .LogUpdated, object: bannerLine)
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: .LogUpdated, object: bannerLine)
+                }
             }
         } catch {
             // best-effort only
@@ -63,7 +71,9 @@ final class Logger {
                 Swift.print("[WARN] Logger: failed to write log: \(error)")
             }
 
-            NotificationCenter.default.post(name: .LogUpdated, object: line)
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .LogUpdated, object: line)
+            }
         }
     }
 
@@ -93,13 +103,13 @@ final class Logger {
             } catch {
                 Swift.print("[WARN] Logger: failed to clear log file: \(error)")
             }
-            NotificationCenter.default.post(name: .LogUpdated, object: "__CLEARED__")
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .LogUpdated, object: "__CLEARED__")
+            }
         }
     }
 
     private func iso8601Date() -> String {
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fmt.string(from: Date())
+        return dateFormatter.string(from: Date())
     }
 }

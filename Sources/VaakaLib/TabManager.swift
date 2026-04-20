@@ -7,6 +7,8 @@ extension Notification.Name {
     static let ActiveTabChanged = Notification.Name("Vaaka.ActiveTabChanged")
     // Emitted when a navigation fails with error. userInfo may contain: "siteId" (String), "url" (String), "errorDomain" (String), "errorCode" (Int), "errorDescription" (String)
     static let SiteTabDidFailLoading = Notification.Name("Vaaka.SiteTabDidFailLoading")
+    static let SiteTabDidStartLoading = Notification.Name("Vaaka.SiteTabDidStartLoading")
+    static let SiteTabDidFinishLoading = Notification.Name("Vaaka.SiteTabDidFinishLoading")
 }
 
 /// Manages the 1:1 Site -> SiteTab relationship and ensures all SiteTabs exist at launch
@@ -105,18 +107,7 @@ final class SiteTabManager: NSObject {
                 continue
             }
 
-            let config = WKWebViewConfiguration()
-            let webpagePreferences = WKWebpagePreferences()
-            webpagePreferences.allowsContentJavaScript = true
-            config.defaultWebpagePreferences = webpagePreferences
-
-            let userContent = WKUserContentController()
-            userContent.add(ErrorMessageHandler(siteId: site.id), name: "vaakaError")
-            // Add tracker-blocking rules if the feature is enabled and compiled
-            ContentBlockerManager.shared.addTo(userContentController: userContent)
-            config.userContentController = userContent
-
-            // Create a SiteTab that manages its own configuration internally
+            // SiteTab creates its own WKWebViewConfiguration internally
             let tab = SiteTab(site: site)
             // Make the WebView appear like Safari to servers that vary content by UA
             tab.webView.customUserAgent = UserAgent.safari
@@ -194,15 +185,11 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
             Logger.shared.debug("[NAV] backForward navigation - ALWAYS ALLOWED")
             return decisionHandler(.allow)
         }
-        
-        // Allow in-page navigation and navigations that remain within the owning site's domain (subdomains allowed).
-        // Use hostMatches directly to avoid relying on Site (value) equality which may be brittle across reloads.
-        if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
-            Logger.shared.debug("[NAV] Same domain - ALLOWED")
-            return decisionHandler(.allow)
-        }
 
-        // If this navigation is the result of a user clicking a link, determine policy (external for SSO IdPs or external links)
+        // If this navigation is the result of a user clicking a link, determine policy (external for SSO IdPs or external links).
+        // This must run BEFORE the same-domain check below, because redirect wrapper URLs like
+        // https://www.google.com/url?q=<external> share the root domain with mail.google.com and
+        // would otherwise be allowed in-app without being unwrapped.
         if navigationAction.navigationType == .linkActivated {
             let abs = url.absoluteString
             if let sch = url.scheme?.lowercased(), sch == "data" || sch == "blob" || sch == "about" || abs.hasPrefix("about:") {
@@ -234,22 +221,21 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
                 return decisionHandler(.allow)
             }
 
-            // If the link looks like an SSO/IdP target, keep in-app when it is explicitly whitelisted
-            // (e.g., user has accounts.google.com/atlassian.com added, or this is same-domain matching).
-            let isSSO = SSODetector.isSSO(url)
-            if isSSO {
-                if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
-                    return decisionHandler(.allow)
-                }
-                if SiteManager.shared.isWhitelisted(url: url) {
-                    return decisionHandler(.allow)
-                }
-                NSWorkspace.shared.open(url)
-                return decisionHandler(.cancel)
+            // If the link looks like an SSO/IdP target, always allow in-app so login flows complete.
+            if SSODetector.isSSO(url) {
+                return decisionHandler(.allow)
             }
 
             NSWorkspace.shared.open(url)
             return decisionHandler(.cancel)
+        }
+
+        // Allow navigations that remain within the owning site's domain (subdomains allowed).
+        // This is intentionally after the linkActivated block so that redirect wrapper URLs
+        // (e.g. www.google.com/url?q=…) are unwrapped before the domain check can approve them.
+        if let urlHost = url.host, SiteManager.hostMatches(host: urlHost, siteHost: site.url.host) {
+            Logger.shared.debug("[NAV] Same domain - ALLOWED")
+            return decisionHandler(.allow)
         }
 
         // For non-user-initiated navigations (e.g., redirects, script-driven), allow them — resources from other domains are permitted.
@@ -258,11 +244,11 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
 
     // Notify BrowserWindow about start/finish to allow UI updates (loading indicators)
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidStartLoading"), object: site.id)
+        NotificationCenter.default.post(name: .SiteTabDidStartLoading, object: site.id)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
+        NotificationCenter.default.post(name: .SiteTabDidFinishLoading, object: site.id)
         if let u = webView.url, let host = u.host, SiteManager.hostMatches(host: host, siteHost: site.url.host) {
             UserDefaults.standard.set(u.absoluteString, forKey: "Vaaka.LastURL.\(site.id)")
         }
@@ -271,7 +257,7 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let nsErr = error as NSError
         // Always signal finish so UI stops spinners
-        NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
+        NotificationCenter.default.post(name: .SiteTabDidFinishLoading, object: site.id)
         // Suppress expected errors caused by downloads
         if SiteTabManager.shared.isExpectedInterruption(siteId: site.id) {
             Logger.shared.debug("[DEBUG] Ignoring expected provisional navigation interruption for site: \(site.name) code=\(nsErr.code) domain=\(nsErr.domain)")
@@ -289,7 +275,7 @@ private final class SelfNavigationDelegate: NSObject, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         let nsErr = error as NSError
         // Always signal finish so UI stops spinners
-        NotificationCenter.default.post(name: Notification.Name("Vaaka.SiteTabDidFinishLoading"), object: site.id)
+        NotificationCenter.default.post(name: .SiteTabDidFinishLoading, object: site.id)
         // Suppress expected errors caused by downloads
         if SiteTabManager.shared.isExpectedInterruption(siteId: site.id) {
             Logger.shared.debug("[DEBUG] Ignoring expected navigation interruption for site: \(site.name) code=\(nsErr.code) domain=\(nsErr.domain)")

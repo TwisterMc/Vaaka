@@ -228,13 +228,18 @@ final class ContentBlockerManager {
         DispatchQueue.main.async { NotificationCenter.default.post(name: Self.ContentBlockerDidUpdate, object: nil) }
     }
 
+    private let isoParser: ISO8601DateFormatter = ISO8601DateFormatter()
+    private let displayFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .short
+        return df
+    }()
+
     func lastUpdatedString() -> String? {
         guard let iso = UserDefaults.standard.string(forKey: "Vaaka.BlockerEasyListLastUpdated") else { return nil }
-        if let d = ISO8601DateFormatter().date(from: iso) {
-            let df = DateFormatter()
-            df.dateStyle = .medium
-            df.timeStyle = .short
-            return df.string(from: d)
+        if let d = isoParser.date(from: iso) {
+            return displayFormatter.string(from: d)
         }
         return nil
     }
