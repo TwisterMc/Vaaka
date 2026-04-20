@@ -5,6 +5,7 @@
 If you believe you have found a security issue in Vaaka, please report it privately so we can address it safely.
 
 Preferred contact:
+
 - Email: security@vaakaapp.com
 
 If you do not want to use email, you may open a confidential issue on GitHub and mark it as a security report.
@@ -12,6 +13,7 @@ If you do not want to use email, you may open a confidential issue on GitHub and
 ## What to include
 
 Please include the following information if possible:
+
 - A clear description of the vulnerability
 - The affected version or build of Vaaka
 - Steps to reproduce the issue
